@@ -1,0 +1,16 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# folders to ignore
+images/
+index_files/
+
+# file types to ignore
+*.csv
+*.doc*
+*.pdf
+*.png
+*.xl*
+*.zip
