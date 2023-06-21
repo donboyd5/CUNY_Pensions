@@ -1,0 +1,24 @@
+---
+title: "Quarto Presentations"
+subtitle: "Create beautiful interactive slide decks with Reveal.js"
+format:
+  revealjs: 
+    slide-number: true
+    chalkboard: 
+      buttons: false
+    preview-links: auto
+    logo: images/rock_college.png
+    css: styles.css
+    # footer: <https://quarto.org>
+# resources:
+#   - demo.pdf
+---
+
+## Getting up
+
+- Turn off alarm
+- Get out of bed
+
+## Going to sleep
+
+- Close eyes

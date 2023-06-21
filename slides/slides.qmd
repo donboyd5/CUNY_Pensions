@@ -1,0 +1,31 @@
+---
+title: "The Public Pensions Crisis"
+author: "Don Boyd"
+format: 
+  pptx:
+    reference-doc: template.pptx
+---
+
+## Questions
+
+-   What are defined benefit pension plans?
+-   What's the problem & why do we have it?
+-   How big is the problem? Where are problems biggest?
+-   What can state and local governments do?
+-   What are some good information sources? (EMMA!)
+
+## Discount rates
+
+https://www.milliman.com/en/insight/2023-corporate-pension-funding-study
+
+![](images/ScreenHunter_3061%20Jun.%2021%2009.12.png)
+
+https://www.gsam.com/content/dam/gsam/pdfs/institutions/en/articles/pension-solutions/2019/2019_September_Historic_Lows_Interest_Rates_Raise.pdf?sa=n&rd=n
+
+![](images/ScreenHunter_3062%20Jun.%2021%2009.14.png)
+
+https://www.gsam.com/content/gsam/us/en/institutions/market-insights/gsam-insights/pension-solutions/2023/us-corporate-pension-review-and-preview-2023.html
+
+![](images/ScreenHunter_3063%20Jun.%2021%2009.15.png)
+
+![](images/e9d0e453-c3dd-44e7-beb3-badd360d9ede.png)

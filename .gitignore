@@ -10,7 +10,9 @@ index_files/
 # file types to ignore
 *.csv
 *.doc*
+*.html
 *.pdf
 *.png
+*.pptx
 *.xl*
 *.zip
