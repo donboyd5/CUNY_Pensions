@@ -6,10 +6,12 @@
 # folders to ignore
 _freeze/
 _prep/
+.quarto/
 
 data/
 images/
 index_files/
+pensions_files/
 results/
 
 # file types to ignore

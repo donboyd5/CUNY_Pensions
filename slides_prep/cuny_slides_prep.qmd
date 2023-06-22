@@ -1,0 +1,270 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Slides preparation
+
+```{r}
+#| label: setup
+#| eval: true
+#| include: false
+#| echo: false
+
+library(tidyverse)
+options(tibble.print_max = 60, tibble.print_min = 60) # if more than 60 rows, print 60 - enough for states
+# ggplot2 tibble tidyr readr purrr dplyr stringr forcats
+library(readr)
+
+library(scales)
+library(hms) # hms, for times
+library(lubridate) # lubridate, for date/times
+library(vctrs)
+
+library(grDevices)
+library(knitr)
+library(kableExtra)
+
+library(btools)
+library(bggtools)
+library(pdata)
+
+library(DT) # for datatable
+
+library(zoo) # for rollapply
+
+library(fredr)
+library(httr)
+library(jsonlite)
+
+```
+
+## Discount rates and interest rates
+
+### Get PPD assumed rates
+
+Get `InvestmentReturnAssumption_GASB` from the Public Plans Database.
+
+Calculate median rate for each year.
+
+```{r}
+#| label: ppd-info
+#| eval: false
+#| include: false
+#| echo: false
+
+#.. datasets ----
+call <- "http://publicplansdata.org/api/?q=ListDataSets&format=json"
+res <- jsonlite::fromJSON(call) 
+res
+dim(res)
+res[1, ]
+res[-1, 6:8]
+dsets <- res[-1, 6:8] |> 
+  as_tibble()
+ht(dsets)
+
+#.. variable list ----
+call <- "http://publicplansdata.org/api/?q=ListVariables&format=json"
+res <- jsonlite::fromJSON(call) 
+res
+dim(res)
+res[1, ]
+res[-1, 6:8]
+vars <- res[-1, -c(1:5)] |> 
+  as_tibble()
+ht(vars)
+vars |> filter(FieldName=="InvestmentReturnAssumption_GASB")
+dsets |> filter(id==4)
+vars |> filter(str_detect(FieldName, coll("plan", ignore_case=TRUE)))
+
+```
+
+```{r}
+#| label: ppd-data
+#| eval: false
+#| include: false
+#| echo: false
+
+callbase <- "https://publicplansdata.org/api/?q=QVariables&variables="
+vnames <- "fy,ppd_id,PlanName,InvestmentReturnAssumption_GASB"
+fmt <- "&format=json"
+call <- paste0(callbase, vnames, fmt)
+call
+res <- jsonlite::fromJSON(call) 
+res
+dim(res)
+res[1, ]
+
+data <- res[-1, -c(1:5)] |> 
+  as_tibble() |> 
+  mutate(fy=as.integer(fy),
+         name="air",
+         value=as.numeric(InvestmentReturnAssumption_GASB),
+         note="PPD GASB return assumption") |> 
+  select(fyear=fy, ppdid=ppd_id, plan=PlanName, name, value, note)
+
+saveRDS(data, here::here("data", "ppdvars.rds"))
+
+
+```
+
+### Get private DB GAAP liability discount rates from GSAM
+
+The rate for each year is the average of GASB liability discount rates for S&P 500 firms, as reported by Goldman Sachs Asset Management. These rates are used for financial reporting, not for funding.
+
+Numbers picked from figures in two Goldman Sachs Asset Management reports: [Historic Lows in Interest Rates Raise Questions for Corporate DB Sponsors](https://www.gsam.com/content/dam/gsam/pdfs/institutions/en/articles/pension-solutions/2019/2019_September_Historic_Lows_Interest_Rates_Raise.pdf?sa=n&rd=n) (September 2019) (Exhibit 1 -- 2001 rate only), and [US Corporate Pension Review and Preview 2023](https://www.gsam.com/content/gsam/us/en/institutions/market-insights/gsam-insights/pension-solutions/2023/us-corporate-pension-review-and-preview-2023.html) (Exhibit 3 - rates from 2002 forward).
+
+Here is the figure from the 2023 report:
+
+![](images/ScreenHunter_3067 Jun. 22 05.22.png)
+
+```{r}
+#| label: gsam-liabdiscrate
+#| eval: false
+#| include: false
+#| echo: false
+
+df <- read_csv(
+"fyear, value
+2001, 7.2
+2002, 6.7
+2003, 6.1
+2004, 5.8
+2005, 5.6
+2006, 5.8
+2007, 6.2
+2008, 6.2
+2009, 5.8
+2010, 5.4
+2011, 4.7
+2012, 4.0
+2013, 4.8
+2014, 4.0
+2015, 4.3
+2016, 4.1
+2017, 3.6
+2018, 4.2
+2019, 3.2
+2020, 2.5
+2021, 2.8
+2022, 5.1
+") |> 
+  mutate(fyear=as.integer(fyear),
+         name="ldr",
+         value=value / 100,
+         note="GSAM average GAAP liability discount rate")
+
+df |> 
+  ggplot(aes(fyear, value)) +
+  geom_col()
+# looks good
+
+saveRDS(df, here::here("data", "gsam_ldr.rds"))
+
+
+```
+
+### Get market interest rates from FRED
+
+The two market rates used are:
+
+Board of Governors of the Federal Reserve System (US), Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis \[[DGS10](https://fred.stlouisfed.org/series/DGS10)\], retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/DGS10.
+
+Moody's, Moody's Seasoned Aaa Corporate Bond Yield \[[AAA](https://fred.stlouisfed.org/series/AAA)\], retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/AAA. Note: These instruments are based on bonds with maturities 20 years and above.
+
+```{r}
+#| label: market-rates
+#| eval: false
+#| include: false
+#| echo: false
+
+irates1 <- bind_rows(
+  fredr(series_id="DGS10", frequency = "a"),
+  fredr(series_id="AAA", frequency = "a"))
+
+irates2 <- irates1 |> 
+  mutate(fyear=year(date) |> as.integer(),
+         value=value / 100,
+         note=factor(series_id,
+                     levels=c("DGS10", "AAA"),
+                     labels=c("10-year Treasury rate",
+                              "Moody's AAA corporate rate"))) |> 
+  select(name=series_id, fyear, value, note)
+
+irates2 |> 
+  filter(fyear >= 2000) |> 
+  ggplot(aes(fyear, value, colour=name)) +
+  geom_line() +
+  geom_point()
+
+saveRDS(irates2, here::here("data", "market_rates.rds"))
+
+
+```
+
+### Combine rates, make plot
+
+```{r}
+#| label: rates-plot-prep
+#| eval: true
+#| include: true
+#| echo: false
+#| fig-width: 10
+#| fig-height: 6
+
+ppd1 <- readRDS(here::here("data", "ppdvars.rds"))
+qtiles <- c(0, .1, .25, .5, .75, .9, 1)
+q <- ppd1 |>
+  filter(fyear>=2001) |> # start of real data
+  summarise(n=n(), 
+            nnmiss=sum(!is.na(value)),
+            res=list(quantile(value, probs = qtiles, na.rm=TRUE)), .by = fyear) |> 
+  unnest_wider(col = c(res)) |> 
+  mutate(d9010=`90%` - `10%`)
+
+pubrates <- q |> 
+  select(fyear, `10%`, `50%`, `90%`) |> 
+  pivot_longer(-fyear) |> 
+  mutate(name=paste0("ppd", str_remove(name, "%")))
+
+privrates <- readRDS(here::here("data", "gsam_ldr.rds"))
+
+mktrates <- readRDS(here::here("data", "market_rates.rds"))
+
+rates <- bind_rows(pubrates, privrates, mktrates) |> 
+  filter(fyear>= 2001)
+
+levs <- c("ppd90", "ppd50", "ppd10",
+          "ldr", "AAA", "DGS10")
+labs <- c("Public 90th", "Public DB", "Public 10th",
+          "Private DB",
+          "AAA Corporate", "10-year Treasury")
+
+src <- "Sources: Public Plans Database (public rates), Goldman Sachs (private rates), Federal Reserve Bank of St. Louis (FRED) (market rates)"
+
+p <- rates |> 
+  filter(!name %in% c("ppd90", "ppd10")) |> 
+  mutate(namef=factor(name, levels=levs, labels=labs)) |> 
+  arrange(namef) |> 
+  ggplot(aes(fyear, value, colour=namef)) +
+  geom_line(linewidth=1.25) +
+  geom_point(size=.85) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2026, 2), # , limits=c(2000, 2023)
+                     expand = expansion(mult = c(0.05, 0))) +
+  scale_y_continuous(name=NULL,
+                     breaks=seq(0, 1, .01),
+                     labels = label_percent(accuracy = 1),
+                     limits = c(0, NA_real_)) +
+  ggtitle(label="Public and private DB plan assumed investment returns, and market interest rates") +
+  labs(caption=src) +
+  theme_bw() +
+  legend_notitle +
+  caption_left
+p
+ggsave(here::here("results", "rates.png"), plot=p, height=6, width=10, unit="in", scale=1)
+
+# update.packages(ask = FALSE, checkBuilt = TRUE)
+
+```

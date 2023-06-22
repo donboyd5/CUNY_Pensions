@@ -1,10 +1,45 @@
 ---
 title: "The Public Pensions Crisis"
+subtitle: "Ravitch Fiscal Reporting Program"
 author: "Don Boyd"
-format: 
+institute: Rockefeller College, State University of New York at Albany
+date: today
+date-format: long
+format:
+  revealjs:
+    slide-number: true
+    chalkboard:
+      buttons: false
+    preview-links: auto
+    theme: [white, mycss.scss] # use white, with modifications; default also ok
+    toc: false
+    output-file: "pensions"
+    output-ext:  "html" 
   pptx:
-    reference-doc: template.pptx
+    reference-doc: template.pptx    
+execute:
+  echo: true  
+  freeze: auto
+editor:
+  markdown:
+    canonical: true  
+editor_options: 
+  chunk_output_type: console
 ---
+
+<!-- --- -->
+
+<!-- title: "The Public Pensions Crisis" -->
+
+<!-- author: "Don Boyd" -->
+
+<!-- format:  -->
+
+<!--   pptx: -->
+
+<!--     reference-doc: template.pptx -->
+
+<!-- --- -->
 
 ## Questions
 
@@ -27,5 +62,7 @@ https://www.gsam.com/content/dam/gsam/pdfs/institutions/en/articles/pension-solu
 https://www.gsam.com/content/gsam/us/en/institutions/market-insights/gsam-insights/pension-solutions/2023/us-corporate-pension-review-and-preview-2023.html
 
 ![](images/ScreenHunter_3063%20Jun.%2021%2009.15.png)
+
+![](images/a30e535e-cf71-44f3-87f1-3143b8de87c8.png)
 
 ![](images/e9d0e453-c3dd-44e7-beb3-badd360d9ede.png)

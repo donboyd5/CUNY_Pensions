@@ -1,0 +1,4 @@
+- source: project
+  netlify:
+    - id: 42bd2102-cbb1-47ed-8a9d-c443665a03f4
+      url: 'https://boyd-mta-forecast.netlify.app'
