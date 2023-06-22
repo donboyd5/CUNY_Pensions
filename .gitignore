@@ -4,8 +4,13 @@
 .Ruserdata
 
 # folders to ignore
+_freeze/
+_prep/
+
+data/
 images/
 index_files/
+results/
 
 # file types to ignore
 *.csv
