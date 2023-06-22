@@ -4,7 +4,7 @@ editor_options:
   chunk_output_type: console
 ---
 
-# Slides preparation
+# Assumed investment returns (discount rates) and market interest rates
 
 ```{r}
 #| label: setup
@@ -40,9 +40,7 @@ library(jsonlite)
 
 ```
 
-## Discount rates and interest rates
-
-### Get PPD assumed rates
+## Get PPD assumed rates
 
 Get `InvestmentReturnAssumption_GASB` from the Public Plans Database.
 
@@ -110,7 +108,7 @@ saveRDS(data, here::here("data", "ppdvars.rds"))
 
 ```
 
-### Get private DB GAAP liability discount rates from GSAM
+## Get private DB GAAP liability discount rates from GSAM
 
 The rate for each year is the average of GASB liability discount rates for S&P 500 firms, as reported by Goldman Sachs Asset Management. These rates are used for financial reporting, not for funding.
 
@@ -118,7 +116,7 @@ Numbers picked from figures in two Goldman Sachs Asset Management reports: [Hist
 
 Here is the figure from the 2023 report:
 
-![](images/ScreenHunter_3067 Jun. 22 05.22.png)
+![](images/ScreenHunter_3067%20Jun.%2022%2005.22.png)
 
 ```{r}
 #| label: gsam-liabdiscrate
@@ -166,7 +164,7 @@ saveRDS(df, here::here("data", "gsam_ldr.rds"))
 
 ```
 
-### Get market interest rates from FRED
+## Get market interest rates from FRED
 
 The two market rates used are:
 
@@ -204,14 +202,16 @@ saveRDS(irates2, here::here("data", "market_rates.rds"))
 
 ```
 
-### Combine rates, make plot
+## Combine rates, make plot
+
+Note that the PPD data are on a plan fiscal-year basis. Other rates are on a calendar-year basis.
 
 ```{r}
 #| label: rates-plot-prep
 #| eval: true
 #| include: true
 #| echo: false
-#| fig-width: 10
+#| fig-width: 11
 #| fig-height: 6
 
 ppd1 <- readRDS(here::here("data", "ppdvars.rds"))
@@ -237,20 +237,31 @@ rates <- bind_rows(pubrates, privrates, mktrates) |>
   filter(fyear>= 2001)
 
 levs <- c("ppd90", "ppd50", "ppd10",
-          "ldr", "AAA", "DGS10")
-labs <- c("Public 90th", "Public DB", "Public 10th",
-          "Private DB",
-          "AAA Corporate", "10-year Treasury")
+          "ldr",
+          "AAA", "DGS10")
+labs <- c("Public 90th", "Public DB (assumed)", "Public 10th",
+          "Private DB (assumed)",
+          "AAA Corporate (market)", "10-year Treasury (market)")
 
 src <- "Sources: Public Plans Database (public rates), Goldman Sachs (private rates), Federal Reserve Bank of St. Louis (FRED) (market rates)"
+note <- "Public assumed returns are used for both financial reporting and funding. Private assumed rates are used for financial reporting (rates used for plan funding are different)."
+capt <- paste0(src, "\n", note)
 
 p <- rates |> 
   filter(!name %in% c("ppd90", "ppd10")) |> 
-  mutate(namef=factor(name, levels=levs, labels=labs)) |> 
-  arrange(namef) |> 
+  filter(!name %in% "DGS10") |> 
+  mutate(sector=ifelse(name %in% c("ppd50", "ldr"),
+                      "assumed",
+                      "market"),
+         namef=factor(name, levels=levs, labels=labs)) |> 
+  arrange(sector, namef) |> 
   ggplot(aes(fyear, value, colour=namef)) +
-  geom_line(linewidth=1.25) +
-  geom_point(size=.85) +
+  geom_line(aes(linetype=sector, linewidth=sector)) +
+  geom_point(aes(size=sector)) +
+  scale_colour_manual(values = c("blue", "darkgreen", "grey60")) +
+  scale_linetype_manual(values=c("solid", "solid")) +
+  scale_linewidth_manual(values=c(1.25, .75)) +
+  scale_size_manual(values=c(1.25, .25)) +
   scale_x_continuous(name=NULL, breaks=seq(2000, 2026, 2), # , limits=c(2000, 2023)
                      expand = expansion(mult = c(0.05, 0))) +
   scale_y_continuous(name=NULL,
@@ -258,12 +269,13 @@ p <- rates |>
                      labels = label_percent(accuracy = 1),
                      limits = c(0, NA_real_)) +
   ggtitle(label="Public and private DB plan assumed investment returns, and market interest rates") +
-  labs(caption=src) +
+  labs(caption=capt) +
+  guides(linetype="none", linewidth="none", size="none") +
   theme_bw() +
   legend_notitle +
   caption_left
 p
-ggsave(here::here("results", "rates.png"), plot=p, height=6, width=10, unit="in", scale=1)
+ggsave(here::here("results", "rates.png"), plot=p, height=6, width=11, unit="in", scale=1)
 
 # update.packages(ask = FALSE, checkBuilt = TRUE)
 

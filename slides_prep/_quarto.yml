@@ -33,5 +33,6 @@ book:
   date-format: long
   chapters:
     - index.qmd
-    - cuny_slides_prep.qmd
+    - interest_rates.qmd
+    - equity_like_investments.qmd
 
