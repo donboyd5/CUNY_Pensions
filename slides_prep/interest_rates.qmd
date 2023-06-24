@@ -12,31 +12,7 @@ editor_options:
 #| include: false
 #| echo: false
 
-library(tidyverse)
-options(tibble.print_max = 60, tibble.print_min = 60) # if more than 60 rows, print 60 - enough for states
-# ggplot2 tibble tidyr readr purrr dplyr stringr forcats
-library(readr)
-
-library(scales)
-library(hms) # hms, for times
-library(lubridate) # lubridate, for date/times
-library(vctrs)
-
-library(grDevices)
-library(knitr)
-library(kableExtra)
-
-library(btools)
-library(bggtools)
-library(pdata)
-
-library(DT) # for datatable
-
-library(zoo) # for rollapply
-
-library(fredr)
-library(httr)
-library(jsonlite)
+source(here::here("r", "libraries.r"))
 
 ```
 
@@ -268,7 +244,8 @@ p <- rates |>
                      breaks=seq(0, 1, .01),
                      labels = label_percent(accuracy = 1),
                      limits = c(0, NA_real_)) +
-  ggtitle(label="Public and private DB plan assumed investment returns, and market interest rates") +
+  ggtitle(label="Public and private DB plan assumed investment returns & discount rates",
+          subtitle="Compared to market rates for high-quality corporate bonds") +
   labs(caption=capt) +
   guides(linetype="none", linewidth="none", size="none") +
   theme_bw() +

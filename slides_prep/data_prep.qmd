@@ -1,0 +1,347 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Data preparation that will be used in other files
+
+```{r}
+#| label: setup
+#| eval: true
+#| include: false
+#| echo: false
+
+source(here::here("r", "libraries.r"))
+
+glimpse(fof)
+
+# data(package="fof")
+# glimpse(fofdict_all)
+
+```
+
+
+## Flow of funds
+
+This section maps selected Flow of Funds variable names to names I use in other parts of this program.
+
+
+```{r}
+#| label: fof-map
+#| eval: true
+#| include: true
+#| echo: false
+
+vnames <- vroom(I("
+# general_variables
+FA216210001, other_slgperscurtax
+FA216240001, other_slgprodimptax
+FA216231001, other_slgcorptax
+FA086902005, other_gdp
+FL213162005, other_munisec
+FL213162400, other_stdebt
+FL214090005, other_slgfinass
+FL214190005, other_slgfinliab
+LM653064100, other_mfcorpequity
+LM654090000, other_mfassets
+
+# private_DB_pension_funds
+FL574090045, ppfdb_finassets
+FL573065043, ppfdb_mortgages
+LM573064143, ppfdb_corpequity
+LM573064243, ppfdb_mfshares
+FL573073005, ppfdb_claims
+FL573093043, ppfdb_otherassets
+FL574190043, ppfdb_entitlement
+
+# SLG_DB_funds
+FL224090045, slgdb_finassets
+FL223065043, slgdb_mortgages
+LM223064145, slgdb_corpequity
+LM223064243, slgdb_mfshares
+FL223073045, slgdb_claims
+LM223093043, slgdb_otherassets
+FL224190043, slgdb_entitlement
+"), delim=",", comment="#", col_names=c("snamex", "shortname"))
+vnames
+
+```
+
+
+```{r}
+#| label: fof-data
+#| eval: false
+#| include: false
+#| echo: false
+
+df <- fof |> 
+  right_join(vnames |> 
+               mutate(name=paste0(snamex, ".Q")) |> 
+               select(name, shortname),
+             by = join_by(name))
+count(df, shortname)
+saveRDS(df, here::here("data", "fofextract.rds"))
+
+```
+
+
+## State and local retirement funds, by state, from the FRB
+
+See: 
+
+-   https://www.federalreserve.gov/releases/z1/dataviz/pension/
+
+-   https://www.federalreserve.gov/releases/z1/dataviz/download/zips/efa-state-pension-tables-annual-historical.zip
+
+
+```{r}
+#| label: frb-states
+#| eval: false
+#| include: false
+#| echo: false
+
+url <- "https://www.federalreserve.gov/releases/z1/dataviz/download/zips/efa-state-pension-tables-annual-historical.zip"
+
+temp <- tempfile()
+download.file(url, temp, mode="wb")
+
+# dir_ls(temp)
+(flist <- unzip(zipfile = temp, list = TRUE))
+(fn <- flist$Name[1])
+
+df1 <- read_csv(unz(temp, fn),
+                col_types = cols(.default=col_character()))
+glimpse(df1)
+names(df1)
+count(df1, Region)
+
+fstabbr <- function(stname){
+  factor(stname,
+         levels=c("United States",
+                  state.name,
+                  "District of Columbia"),
+         labels=c("US", state.abb, "DC"))
+}
+
+df2 <- df1 |> 
+  select(year=Date, stname=Region, everything()) |> 
+  mutate(year=as.integer(year), stabbr=fstabbr(stname)) |> 
+  pivot_longer(-c(year, stabbr, stname),
+               names_to = "description") |> 
+  mutate(vname=case_when(str_detect(description, "Pension assets") ~ "assets",
+                         str_detect(description, "Pension liabilities") ~ "liab",
+                         str_detect(description, coll("Funding status (millions)")) ~ "ufl",
+                         str_detect(description, "Assets as a percent") ~ "frpct",
+                         str_detect(description, "percent of state GDP") ~ "pctgdp",
+                         str_detect(description, "percent of state revenue") ~ "pctstrev",
+                         TRUE ~ NA_character_),
+         value=as.numeric(value),
+         value=ifelse(str_detect(description, "percent"), value / 100, value)) |> 
+  select(year, stabbr, stname, vname, description, value)
+names(df1)
+glimpse(df2)
+count(df2, stabbr, stname)  
+count(df2, description, vname)
+
+saveRDS(df2, here::here("data", "stlpensions_frb.rds"))
+
+```
+
+
+```{r}
+#| label: frb-states-show
+#| eval: true
+#| include: true
+#| echo: false
+#| df-print: paged
+
+stpen <- readRDS(here::here("data", "stlpensions_frb.rds"))
+count(stpen, vname, description)
+
+stpen |> 
+  filter(year==max(year), vname=="frpct", stabbr != "DC") |> 
+  select(stname, vname, year, value) |> 
+  arrange(desc(value))
+
+stpen |> 
+  filter(year %in% c(2010, 2020), vname=="frpct", stabbr != "DC") |> 
+  select(stname, year, vname, value) |> 
+  arrange(year) |> 
+  pivot_wider(names_from = year) |> 
+  mutate(change=`2020` - `2010`) |> 
+  arrange(desc(`2020`))
+
+tab <- stpen |> 
+  filter(year %in% c(2010, 2020), vname=="pctgdp", stabbr != "DC") |> 
+  select(stname, year, vname, value) |> 
+  arrange(year) |> 
+  mutate(value=-value) |> 
+  pivot_wider(names_from = year) |> 
+  mutate(change=`2020` - `2010`) |> 
+  arrange(desc(`2020`))
+
+rmarkdown::paged_table(tab)
+
+```
+
+
+
+## State and local retirement funds, from BEA
+
+BEA API key: 21F782AD-56A6-439D-B3D5-9A592F020E26
+
+https://apps.bea.gov/itable/?ReqID=70&step=1#eyJhcHBpZCI6NzAsInN0ZXBzIjpbMSwyNCwyOSwyNSwzMSwyNl0sImRhdGEiOltbIlRhYmxlSWQiLCI4MyJdLFsiQ2xhc3NpZmljYXRpb24iLCJOb24tSW5kdXN0cnkiXSxbIk1ham9yX0FyZWEiLCIwIl0sWyJTdGF0ZSIsWyIwIl1dXX0=
+
+Regional data
+GDP and personal income
+SAINC70 Transactions of state and local government defined benefit pension plans
+
+See this:
+https://jwrchoi.com/post/how-to-use-bureau-of-economic-analysis-bea-api-in-r/
+
+```{r}
+#| label: bea-play
+#| eval: false
+#| include: false
+#| echo: false
+
+library(bea.R)
+beakey <- "21F782AD-56A6-439D-B3D5-9A592F020E26"
+
+beaSearch('personal consumption', beakey)
+
+linecode <- beaParamVals(beaKey = beakey, "Regional", "LineCode")$ParamValue |> 
+  as_tibble() |> 
+  lcnames()
+# tmp <- beaParamVals(beaKey = beakey, "Regional", "LineCode")
+tmp <- linecode |> 
+  filter(str_detect(desc, "SAINC70"))
+
+beaSpecs10 <- list(
+  "UserID" = beakey, # Set up API key
+  "Method" = "GetData", # Method
+  "datasetname" = "Regional", # Specify dataset
+  "TableName" = "CAEMP25N", # Specify table within the dataset
+  "LineCode" = 10, # Specify the line code
+  "GeoFips" = "COUNTY", # Specify the geographical level
+  "Year" = 2018 # Specify the year
+)
+
+bea10 <- beaGet(beaSpecs10, asWide = FALSE)
+bea10 <- bea10 |> as_tibble()
+
+specs <- list(
+  UserID = beakey,
+  Method = "GetData",
+  datasetname = "Regional",
+  TableName = "CAEMP25N",
+  LineCode = 10,
+  GeoFips = "COUNTY", # geographic level
+  Year = 2020
+)
+
+df <- beaGet(specs, asWide = FALSE) |> as_tibble()
+glimpse(df)
+
+df2 <- df |> 
+  lcnames() |> 
+  rename(year=timeperiod, clunit=cl_unit, mult=unit_mult, value=datavalue, note=noteref)
+glimpse(df2)
+
+
+userSpecList <- list('UserID' = 'yourAPIKey' ,
+								'Method' = 'GetData',
+								'datasetname' = 'NIPA',
+								'Frequency' = 'A',
+								'TableID' = '68',
+								'Year' = 'X')	
+specs <- list(
+  UserID = beakey,
+  Method = "GetData",
+  datasetname = "Regional",
+  TableName = "SAINC70",
+  #LineCode = 10,
+  GeoFips = "STATE", # geographic level
+  Year = 'X'
+)
+
+djb <- beaGet(specs, asTable = TRUE)
+
+userSpecList <- list('UserID' = 'yourAPIKey' ,
+								'Method' = 'GetData',
+								'datasetname' = 'NIPA',
+								'Frequency' = 'A',
+								'TableID' = '68',
+								'Year' = 'X')	
+BDT <- beaGet(userSpecList, asTable = TRUE)
+
+
+rparms <- beaParams(beakey, 'Regional')
+pencodes <- linecode |> 
+  filter(str_detect(desc, "SAINC70")) |> 
+  distinct() |> 
+  mutate(key=as.integer(key)) |> 
+  arrange(key)
+
+specs <- list(
+  UserID = beakey,
+  Method = "GetData",
+  datasetname = "Regional",
+  TableName = "SAINC70",
+  LineCode = 10,
+  GeoFips = "STATE", # geographic level
+  Year = 'ALL'
+)
+
+djb <- beaGet(specs, asWide = FALSE)
+count(djb, GeoFips, GeoName)
+djb2 <- djb |> 
+  lcnames() |> 
+  rename(year=timeperiod, clunit=cl_unit, mult=unit_mult, value=datavalue) |> 
+  mutate(year=as.integer(year))
+skim(djb2)
+
+pencodes$key
+
+f <- function(key){
+  specs <- list(
+    UserID = beakey,
+    Method = "GetData",
+    datasetname = "Regional",
+    TableName = "SAINC70",
+    LineCode = as.character(key),
+    GeoFips = "STATE", # geographic level
+    Year = 'ALL')
+  
+  beaGet(specs, asWide = FALSE) |> 
+    mutate(line=key)
+  }
+
+df <- purrr::map(1:32, f, .progress = TRUE) |> list_rbind()
+
+df2 <- df |> 
+  lcnames() |> 
+  rename(year=timeperiod, clunit=cl_unit, mult=unit_mult, value=datavalue) |>
+  left_join(pencodes |> rename(line=key),
+            by = join_by(line)) |> 
+  mutate(year=as.integer(year),
+         table="SAINC70",
+         desc=str_remove(desc, coll("[SAINC70] "))) |> 
+  select(geofips, geoname, table, line, desc, clunit, year, value) |> 
+  arrange(geofips, table, line, year)
+glimpse(df2)
+skim(df2)
+count(df2, line, desc)
+
+df2 |> 
+  filter(geoname=="New York", line==5)
+df2 |> 
+  filter(geoname=="United States", line==5)
+
+
+
+```
+
+
+

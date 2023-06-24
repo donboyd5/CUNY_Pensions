@@ -33,6 +33,8 @@ book:
   date-format: long
   chapters:
     - index.qmd
+    - data_prep.qmd
     - interest_rates.qmd
     - equity_like_investments.qmd
+    - ufl_pct_gdp.qmd
 

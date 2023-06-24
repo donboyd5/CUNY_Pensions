@@ -6,3 +6,87 @@ editor_options:
 
 # Equity-like investments
 
+```{r}
+#| label: setup
+#| eval: true
+#| include: false
+#| echo: false
+
+source(here::here("r", "libraries.r"))
+library(fof)
+glimpse(fof)
+
+# data(package="fof")
+# glimpse(fofdict_all)
+
+```
+
+
+```{r}
+#| label: plot-data
+#| eval: true
+#| include: false
+#| echo: false
+
+df <- readRDS(here::here("data", "fofextract.rds")) |> 
+  separate(shortname, into=c("type", "vname")) 
+
+# redirect has disappeared from the data, so compute
+other <- df |> 
+  filter(type=="other") |> 
+  select(date, vname, value) |> 
+  pivot_wider(names_from = vname) |> 
+  mutate(mfstockshare=mfcorpequity / mfassets) |>  # economywide share of mutual fund assets in corp equities
+  select(date, gdp, mfstockshare)
+
+fofq <- df  |>
+  filter(type != "other") |> 
+  select(date, type, vname, value) |>
+  pivot_wider(names_from = vname) |> 
+  left_join(other, by = join_by(date)) |> 
+  mutate(invassets=entitlement - claims,
+         redirect=invassets - (finassets - claims), # no longer a reported variable
+         fr.mv=invassets / entitlement,
+         equity = corpequity + (mfshares + otherassets) * mfstockshare + redirect,
+         equityshare = equity / invassets,
+         # equityslgtax = equity / slgtax * 100,
+         equitygdpshare = equity / gdp)
+
+
+```
+
+
+```{r}
+#| label: plot
+#| eval: true
+#| include: true
+#| echo: false
+#| fig-width: 11
+#| fig-height: 6
+
+gtitle1 <- "Equity-like investments as percentage of invested assets"
+gtitle2 <- "State and local government and private sector defined benefit pension plans"
+
+src <- "\nSource: Authors' analysis of Z.1 Financial Accounts of the United States,\nFederal Reserve Board, Tables L.118.b, L.120.b, and L.122"
+
+p <- fofq %>%
+  mutate(typef=factor(type, levels=c("slgdb", "ppfdb"),
+                      labels=c("State & local", "Private"))) |> 
+  relocate(typef, .after=type) |>
+  arrange(typef, date) |> 
+  ggplot(aes(x=date, y=equityshare, colour=typef)) +
+  geom_line(linewidth=1) +
+  geom_point(size=0.8) +
+  scale_y_continuous(name=NULL, breaks=seq(0, 1, 0.05), limits=c(0, NA), labels=scales::percent_format(accuracy=1)) +
+  scale_x_date(name=NULL, breaks=seq.Date(as.Date("1900-01-01"), as.Date("2025-01-01"), "5 years"), date_labels = "%Y") +
+  scale_colour_manual(values=c("blue", "darkgreen")) +
+  guides(colour=guide_legend(title=NULL)) +
+  labs(x=xlab, caption=src) +
+  ggtitle(label=gtitle1, subtitle=gtitle2) +
+  theme_bw() +
+  theme(plot.caption = element_text(hjust=0, size=rel(.8)))
+p
+ggsave(here::here("results", "equity_shares.png"), plot=p, height=6, width=11, scale=1)
+
+```
+
