@@ -4,6 +4,7 @@ options(tibble.print_max = 60, tibble.print_min = 60) # if more than 60 rows, pr
 # ggplot2 tibble tidyr readr purrr dplyr stringr forcats
 library(readr)
 library(vroom)
+library(readxl)
 library(fs)
 
 library(scales)
@@ -15,6 +16,7 @@ library(skimr)
 library(grDevices)
 library(knitr)
 library(kableExtra)
+library(ggrepel)
 
 # my packages
 library(btools)
@@ -26,6 +28,7 @@ library(DT) # for datatable
 
 library(zoo) # for rollapply
 
+library(bea.R)
 library(fredr)
 library(httr)
 library(jsonlite)

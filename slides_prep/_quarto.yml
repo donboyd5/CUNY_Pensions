@@ -21,8 +21,8 @@ editor_options:
 format:
   html:
     theme: cosmo
-    fig-width: 8
-    fig-height: 8
+    fig-width: 11
+    fig-height: 6
   # pdf:
   #   documentclass: scrreprt
 
@@ -37,4 +37,6 @@ book:
     - interest_rates.qmd
     - equity_like_investments.qmd
     - ufl_pct_gdp.qmd
+    - uflgdp_vs_fr.qmd
+    - treadwater.qmd
 

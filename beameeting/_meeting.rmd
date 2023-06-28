@@ -1,0 +1,1531 @@
+---
+title: "BEA pensions data"
+author: "Don Boyd"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_notebook:
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+
+<!-- 
+
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+
+editor_options: 
+  chunk_output_type: console  [or inline] -->
+
+```{r setup, echo=FALSE, cache=FALSE}
+# knitr::clean_cache(clean = FALSE, path = opts_chunk$get("cache.path"))
+options(width=120)
+knitr::opts_chunk$set(fig.width=10, fig.height=6, echo=FALSE, warning=FALSE, message=FALSE)
+# Note: when saving maps (ggsave), width=16, height=9 seems to get rid of white space
+
+```
+
+
+
+```{r libraries, include=FALSE}
+library("magrittr")
+library("plyr") # needed for ldply; must be loaded BEFORE dplyr
+library("tidyverse")
+options(tibble.print_max = 60, tibble.print_min = 60) # if more than 60 rows, print 60 - enough for states
+# ggplot2 tibble tidyr readr purrr dplyr stringr forcats
+
+library("scales")
+library("hms") # hms, for times
+library("lubridate") # lubridate, for date/times
+library("vctrs")
+
+library("readxl") # readxl, for .xls and .xlsx files
+
+library("grDevices")
+library("knitr")
+library("kableExtra")
+library("gridExtra")
+library("ggrepel") # for moving label text away from points
+library("ggalt") # for encircling groups of points
+
+library("DT")
+
+library("zoo") # for rollapply
+
+library("btools")
+library("pdata")
+
+library("BEAData")
+library("apitools")
+
+```
+
+
+```{r functions, include=FALSE}
+ns <- function(df) {names(df) %>% sort}
+
+pmt <- function(p, i, n, end = FALSE){
+  # amortization function with constant payment at each period 
+  # p = principle, i = interest rate, n = periods. 
+  # end: , if TRUE, payment at the end of period. 
+  if(end) p <- p*(1 + i)
+  a_n <- (1 - (1 + i)^(-n))/(1 - 1/(1 + i))
+  pmt <- p / a_n
+  return(pmt)  
+}
+
+```
+
+
+```{r ONETIME_getLenzeData, eval=FALSE}
+fn <- "All states for Boyd.xlsx"
+
+excel_sheets(fn)
+
+read_excel(fn, 2)
+
+f <- function(sheet){
+  df <- read_excel(fn, sheet)
+  df <- df %>%
+    mutate(vname=excel_sheets(fn)[sheet])
+  return(df)
+  }
+
+df <- ldply(2:length(excel_sheets(fn)), f)
+glimpse(df)
+count(df, vname)
+df2 <- df %>%
+  select(-`...1`) %>%
+  rename(stname=`...2`) %>%
+  mutate(stname=str_trim(stname)) %>%
+  mutate(stabbr=factor(stname, levels=c(state.name, "Sum", "D.C."), labels=c(state.abb, "US", "DC")) %>% as.character) %>%
+  gather(year, value, -vname, -stname, -stabbr) %>%
+  filter(!is.na(value)) %>%
+  mutate(year=as.integer(year)) %>%
+  select(vname, year, stabbr, stname, value)
+glimpse(df2)
+
+count(df2, stname, stabbr)
+saveRDS(df2, here::here("data", "lenze.rds"))
+# DT::datatable(df2)
+
+```
+
+
+```{r ONETIME_createPPDfiles, eval=FALSE}
+# glimpse(ppd)
+# get some national values
+ppd_nat <- ppd %>%
+  filter(!is.na(fy)) %>%
+  group_by(fy) %>%
+  summarise(p50=median(InvestmentReturnAssumption_GASB * 100, na.rm=TRUE))
+saveRDS(ppd_nat, here::here("data", "ppd_nat.rds"))
+
+
+```
+
+
+```{r ONETIME_otherData, eval=FALSE}
+# PPD plan assumed rate of return (median)
+aror <- ppd %>%
+  filter(!is.na(fy)) %>%
+  group_by(year=fy) %>%
+  summarise(value=median(InvestmentReturnAssumption_GASB * 100, na.rm=TRUE)) %>%
+  mutate(series="aror_p50") %>%
+  select(series, year, value)
+
+# bea discount rates
+beadr <- tibble(year=2000:2018) %>%
+  mutate(series="beadr",
+         value=case_when(year %in% 2000:2003 ~ 6,
+                       year %in% 2004:2009 ~ 5.5,
+                       year %in% 2010:2012 ~ 5,
+                       year %in% 2013:2018 ~ 4)) %>%
+  select(series, year, value)
+
+# AAA Moody's Seasoned Aaa Corporate Bond Yield (AAA), monthly
+# DGS10 10-year Treasury, daily
+rates_fred <- FRED(c("AAA", "DGS10"))
+ht(rates_fred)
+count(rates_fred, series, freq)
+
+rates_a <- rates_fred %>%
+  group_by(series, year=year(date)) %>%
+  summarise(value=mean(value, na.rm=TRUE)) %>%
+  bind_rows(beadr, aror) 
+ht(rates_a)
+
+saveRDS(rates_a, here::here("data", "rates_a.rds"))
+
+```
+
+
+```{r getdata, include=FALSE}
+
+lenze <- readRDS(here::here("data", "lenze.rds"))
+ppd_nat <- readRDS(here::here("data", "ppd_nat.rds"))
+rates <- readRDS(here::here("data", "rates_a.rds"))
+
+# fix some obviously bad data in the ppd
+ppd2 <- ppd %>%
+  filter(!(is.na(fy) & ppd_id==157)) %>%
+  mutate(PlanName=str_replace_all(PlanName, "[^[:alnum:]]", " "),
+         ActFundedRatio_GASB67=ifelse(fy==2018 & ppd_id==119, ActFundedRatio_GASB67 * 1000, ActFundedRatio_GASB67),
+         NormCostRate_ER=ifelse(NormCostRate_ER < 0, NA_real_, NormCostRate_ER),
+         NormCostRate_ER=ifelse(ppd_id==188 & fy %in% c(2005, 2017), NA_real_, NormCostRate_ER),
+         NormCostRate_ER=ifelse(NormCostRate_ER==0, NA_real_, NormCostRate_ER))
+ppd2 %>% filter(ppd_id==119) %>% select(ppd_id, PlanName, fy, MktAssets_net, ActFundedRatio_GASB, ActFundedRatio_GASB67)
+
+glimpse(lenze)
+glimpse(ppd_nat)
+glimpse(rates)
+glimpse(sgdp.a)
+
+```
+
+
+```{r getdata_sgdp, include=FALSE}
+count(lenze, vname)
+count(lenze, stabbr) # 52 incl DC US
+count(sgdp.a, stabbr)
+sgdp.a %>% filter(stabbr=="US") # no data for US nominal GDP
+
+lwide <- lenze %>%
+  spread(vname, value) %>%
+  mutate(claims=liabeoy - ass)
+
+gdp <- sgdp.a %>%
+  filter(stabbr!="US") %>% # drop US and compute it
+  select(-rgdp) %>%
+  # for now calc US gdp as sum of state gdp
+  bind_rows(sgdp.a %>% group_by(year) %>% summarise(gdp=sum(gdp, na.rm=TRUE)) %>% mutate(stabbr="US")) %>%
+  mutate(gdp=gdp * 1000)
+count(gdp, stabbr) # 52 incl DC US
+
+lwide_all <- lwide %>%
+  select(-stname) %>%
+  left_join(rates %>% ungroup %>% filter(series=="beadr") %>% select(year, beadr=value)) %>%
+  group_by(stabbr) %>%
+  arrange(year) %>%
+  mutate(claims_lag = lag(claims),
+         iclaims=claims_lag * beadr / 100, # this is not quite the same as iipce in the DR change years; it should be
+         amort=pmt(claims_lag, beadr/100, 15),
+         encpsc=enc + psc,
+         encpscint=encpsc + iipce,
+         treadgap=encpscint - aec,
+         encamort=encpsc + amort,
+         prin=amort - iipce) %>%
+  ungroup
+glimpse(lwide_all)
+ns(lwide_all)
+# ht(lwide_all)
+
+lwide_all %>% filter(stabbr=="NY") %>% select(year, stabbr, iipce, iclaims)
+
+pctgdp_wide <- lwide_all %>%
+  # gather(vname, value, -year, -stabbr, -beadr) %>%
+  left_join(gdp) %>%
+  mutate(fr=ass / liabeoy * 100) %>%
+  mutate_at(vars(-year, -stabbr, -beadr, -fr, -gdp), ~ . / gdp * 100)
+glimpse(pctgdp_wide)
+
+# pctgdp <- lwide %>%
+#   select(year, stabbr, claims, ass, liabeoy) %>%
+#   left_join(gdp) %>%
+#   mutate(uflpct=claims / gdp * 100,
+#          fr=ass / liabeoy * 100)
+
+# sts <- c("RI", "IL", "NY", "WI", "SD", "US")
+# sts <- c("IL", "NJ", "CT", "SC", "KY", "US")
+# sts <- blist
+# pctgdp %>%
+#   filter(stabbr %in% sts) %>%
+#   ggplot(aes(year, uflpct, colour=stabbr)) +
+#   geom_line()
+
+# what if we had constructed a portfolio with a specific duration?
+
+
+# data check - state gdp per BEA https://apps.bea.gov/itable/iTable.cfm?ReqID=70&step=1#reqid=70&step=1&isuri=1
+# SAGDP2N Gross domestic product (GDP) by state 1/
+# Gross domestic product (GDP) by state: All industry total (Millions of current dollars)
+# State or DC
+# GeoFips	GeoName	2014	2015	2016	2017	2018
+# 36000	New York	1,427,812.7	1,487,789.4	1,541,524.4	1,598,457.0	1,676,350.2
+# good, the data match
+# sgdp.a %>% filter(stabbr=="NY") # data are in millions
+# gdp %>% filter(stabbr=="NY")
+
+# Lenze data are in thousands, gdp are in millions
+# 798521899 / (1598457.0 * 1000) * 100
+# wow, 50% of GDP -- is that possible? yes, total liability
+
+```
+
+
+# PPD facts
+```{r ppd}
+# glimpse(ppd)
+ppd2 %>%
+  group_by(fy) %>%
+  summarise(n=n(), MktAssets_net=sum(MktAssets_net, na.rm=TRUE) / 1e9)
+
+# 2018: ppd/bea
++3.717313	/ 4.077150
+# ns(ppd2)
+
+# ppd2 %>%
+#   select(stabbr, year=fy, MktAssets_net)
+
+ppd2 %>% filter(fy==2018) %>%
+  select(StateAbbrev, GovtName, PlanName, MktAssets_net, ActFundedRatio_GASB, ppd_id) %>% 
+  arrange(StateAbbrev, GovtName, PlanName) %>%
+  datatable
+
+# figure out variables to include
+# (vars <- str_subset(names(ppd2), coll("liab", ignore_case = TRUE)))
+# vars <- c("ActFundedRatio_GASB", "ActFundedRatio_est",  "ActFundedRatio_GASB67")
+# vars <- c("ActAssets_GASB", "ActLiabilities_GASB", "ActFundedRatio_GASB", "ActFundedRatio_GASB67")
+# ppd2 %>% select(PlanName, fy, vars) %>% datatable
+
+```
+
+
+# Plot of rates
+```{r rates_plot}
+sfact <- tribble(
+  ~levs, ~labs, ~color, ~size,
+  "aror_p50", "Assumed return\n(PPD median)", "red", 1.2,
+  "beadr", "BEA discount rate", "blue", 1.2,
+  "AAA", "AAA corporate\nbond rate (Moody's)", "#beaed4", .7,
+  "DGS10", "Risk-free rate\n(Treasury 10-year)", "#fdc086", .7)
+
+p <- rates %>%
+  filter(year>=2000, year<=2018) %>%
+  ungroup %>%
+  mutate(series=factor(series, levels=sfact$levs, labels=sfact$labs)) %>%
+  ggplot(aes(year, value, colour=series, size=series)) + 
+  geom_line() + 
+  geom_point() +
+  theme_bw() +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="Percent", breaks=seq(0, 20, 1), limits=c(0, NA)) +
+  scale_colour_manual(values=sfact$color) +
+  scale_size_manual(values=sfact$size) +
+  ggtitle("Public plan return assumptions (discount rates), BEA discount rate, and selected market rates") +
+  guides(colour=guide_legend(title=NULL, keyheight=0.35, default.unit="inch"),
+         size=guide_legend(title=NULL)) +
+  geom_hline(yintercept = 0)
+
+p
+ggsave(here::here("results", "rates_plot.png"), p, width=10, height=6)
+
+# clrs <- c("black", "darkgreen", "#beaed4", "#fdc086")
+# szs <- c(1.2, 1.2, .9, .9)
+  
+
+```
+
+
+```{r combine_data, include=FALSE}
+
+ernc <- ppd2 %>% 
+  select(fy, StateAbbrev, ppd_id, PlanName, 
+         MktAssets_net,
+         payroll,
+         NormCostAmount_tot, NormCostAmount_EE, NormCostAmount_ER,
+         NormCostRate_tot, NormCostRate_EE, NormCostRate_ER) %>%
+  group_by(StateAbbrev, ppd_id, PlanName) %>%
+  arrange(fy) %>%
+  mutate(ernc=NormCostRate_ER) %>%
+  fill(payroll, ernc)
+# ernc %>% filter(ppd_id==1)
+# ernc %>% filter(ppd_id==9)
+ernc %>%
+  group_by(fy) %>%
+  do(qtiledf(.$ernc))
+
+ernc_sum <- ernc %>%
+  group_by(year=fy) %>%
+  summarise(payroll_amount=sum(payroll, na.rm=TRUE),
+            ernc_amount=sum(payroll * ernc, na.rm=TRUE)) %>%
+  mutate(ernc=ernc_amount / payroll_amount)
+# ernc_sum
+
+# payroll per Census 2016 927,895,885
+# ernc per BEA 2018 167,200,000
+# 167.2 / 927.895885
+
+
+
+ppd2 %>% filter(NormCostRate_ER>1)
+# tmp <- ppd2 %>% filter(NormCostRate_ER==0) %>%
+#   select(ppd_id, PlanName, fy, NormCostRate_ER, NormCostAmount_ER)
+# tmp <- ppd2 %>% filter(ppd_id==191) %>%
+#   select(ppd_id, PlanName, fy, NormCostRate_ER, NormCostAmount_ER)
+
+# 191
+# tmp <- ppd2 %>% filter(fy==2018) %>% filter(NormCostRate_ER==max(NormCostRate_ER, na.rm=TRUE))
+# tmp %>% select(payroll, contains("NormCost"))
+
+# # vars <- c("ActAssets_GASB", "ActLiabilities_GASB", "ActFundedRatio_GASB", "ActFundedRatio_GASB67")
+# note: ActLiabilities_GASB and ActFundedRatio_GASB are with plan assumed return
+# and ActFundedRatio_GASB67 is with mixed DR if it is used
+# so we need to recompute liabs
+ppdfr <- ppd2 %>% 
+  select(year=fy, stabbr=StateAbbrev, ppd_id, PlanName, 
+         payroll, NormCostRate_ER,
+         NetPosition, TotalPensionLiability, NetPensionLiability,
+         ActAssets_GASB25=ActAssets_GASB, ActLiabilities_GASB25=ActLiabilities_GASB, UAAL_GASB25=UAAL_GASB,
+         MktAssets_net, 
+         ActFundedRatio_GASB25=ActFundedRatio_GASB, ActFundedRatio_GASB67) %>%
+  mutate(liab_act=ifelse(!is.na(TotalPensionLiability), TotalPensionLiability, ActLiabilities_GASB25),
+         assets_mv=MktAssets_net,
+         uaal_mva=liab_act - assets_mv)
+# ppdfr %>% filter(stabbr=="NJ")
+# ppdfr %>% filter(ppd_id==71) %>% write_csv("d:/temp/test.csv")
+# ppdfr %>% filter(year %in% 2017:2018) %>% top_n(5, liab_act)
+
+ppdfr_sum <- ppdfr %>%
+  filter(!is.na(uaal_mva)) %>%
+  group_by(year) %>%
+  summarise(liab_act=sum(liab_act),
+            assets_mv=sum(assets_mv),
+            uaal_mva=sum(uaal_mva),
+            ernc=sum(payroll * NormCostRate_ER, na.rm=TRUE)) %>%
+  mutate(fr_mv=assets_mv / liab_act)
+
+beafr <- lenze %>%
+  filter(year>=2000, vname %in% c("ass", "liabeoy"), stabbr!="US") %>%
+  select(year, stabbr, vname, value) %>%
+  spread(vname, value) %>%
+  group_by(year) %>%
+  summarise(ass=sum(ass), liabeoy=sum(liabeoy)) %>%
+  mutate(fr_mv=ass / liabeoy)
+
+combo <- 
+  ppdfr_sum %>% mutate(src="ppd") %>%
+  bind_rows(beafr %>% 
+              rename(assets_mv=ass, liab_mv=liabeoy) %>% 
+              mutate(uaal_mva=liab_mv - assets_mv,
+                     src="bea")) %>%
+  mutate(liab=ifelse(src=="ppd", liab_act, liab_mv),
+         srcu=factor(src, levels=c("bea", "ppd"), labels=c("BEA (CY)", "PPD (FY)")))
+combo
+
+```
+
+
+# 4-panel graph of BEA vs PPD
+```{r 4_panel}
+# https://cran.r-project.org/web/packages/egg/vignettes/Ecosystem.html
+lsize <- 1
+psize <- 1
+clrs <- c("blue", "red")
+
+p_mva <- combo %>%
+  mutate(assets_mv=assets_mv / 1e9) %>%
+  ggplot(aes(year, assets_mv, colour=srcu)) +
+  geom_line(size=lsize) +
+  geom_point(size=psize) +
+  geom_hline(yintercept = 0, colour="darkgrey") +
+  scale_y_continuous(name="$ trillions", limits=c(0, 9), breaks=seq(0, 10, 1)) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_color_manual(values=clrs) +
+  ggtitle("Market value of assets") +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL))
+p_mva
+
+p_liab <- combo %>%
+  mutate(liab=liab / 1e9) %>%
+  ggplot(aes(year, liab, colour=srcu)) +
+  geom_line(size=lsize) +
+  geom_point(size=psize) +
+  geom_hline(yintercept = 0, colour="darkgrey") +
+  geom_vline(xintercept = 2004, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2010, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2013, linetype="dashed", colour="darkgrey") +
+  scale_y_continuous(name="$ trillions", limits=c(0, 9), breaks=seq(0, 10, 1)) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_color_manual(values=clrs) +
+  ggtitle("Liabilities") +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL))
+p_liab
+
+val1 <- combo$uaal_mva[combo$year==2008 & combo$src=="bea"] / 1e9
+val2 <- combo$uaal_mva[combo$year==2009 & combo$src=="ppd"] / 1e9
+
+p_ufl <- combo %>%
+  mutate(uaal_mva=uaal_mva / 1e9) %>%
+  ggplot(aes(year, uaal_mva, colour=srcu)) +
+  geom_line(size=lsize) +
+  geom_point(size=psize) +
+  geom_hline(yintercept = 0, colour="darkgrey") +
+  geom_vline(xintercept = 2004, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2010, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2013, linetype="dashed", colour="darkgrey") +
+  scale_y_continuous(name="$ trillions", breaks=seq(0, 10, 0.5)) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_color_manual(values=clrs) +
+  ggtitle("Unfunded liability") +
+  geom_segment(x=2008, xend=2018, y=val1, yend=val1, linetype="solid", colour="grey") +
+  geom_segment(x=2009, xend=2018, y=val2, yend=val2, linetype="solid", colour="grey") +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL))
+p_ufl
+
+p_frmv <- combo %>%
+  mutate(fr_mv=fr_mv * 100) %>%
+  ggplot(aes(year, fr_mv, colour=srcu)) +
+  geom_line(size=lsize) +
+  geom_point(size=psize) +
+  geom_hline(yintercept = 0, colour="darkgrey") +
+  geom_vline(xintercept = 2004, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2010, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2013, linetype="dashed", colour="darkgrey") +
+  scale_y_continuous(name="Percent", breaks=seq(0, 200, 10)) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_color_manual(values=clrs) +
+  ggtitle("Funded ratio") +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL))
+p_frmv
+
+
+capt <- "Note: Dashed vertical lines show years in which BEA discount rate was lowered"
+panels <- grid.arrange(p_mva, p_liab, p_ufl, p_frmv, ncol = 2,
+                       bottom=capt)
+panels
+ggsave(here::here("results", "panels.png"), panels, width=10, height=6, scale=1)
+
+
+```
+
+
+# Liabilities as % of State GDP
+
+
+# There's no place like Illinois
+```{r badIL}
+(bad <- pctgdp_wide %>% filter(year==2018) %>% top_n(10, claims) %>% arrange(-claims) %>% select(year, stabbr, claims))
+
+(stlist <- c("US", bad$stabbr[1:5]))
+
+p <- pctgdp_wide %>%
+  filter(stabbr %in% stlist) %>%
+  ggplot(aes(year, claims, colour=stabbr)) +
+  geom_line(size=1) +
+  geom_point(size=1) +
+  geom_hline(yintercept = 0, colour="darkgrey") +
+  scale_y_continuous(name="Percent", breaks=seq(0, 200, 5)) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  # scale_color_manual(values=clrs) +
+  ggtitle("Unfunded liability as % of GDP") +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL))
+p
+
+f <- function(df) {
+  badval <- 25
+  labval <- 30
+  df <- df %>%
+    group_by(year) %>%
+    mutate(p25=pany(claims, .25),
+           p50=pany(claims, .50),
+           p75=pany(claims, .75),
+           iqr=p75 - p25,
+           upperwhisk=p50 + 1.5*iqr,
+           lowerwhisk=p50 - 1.5*iqr) %>%
+    filter(claims > upperwhisk | claims < lowerwhisk | claims > badval) %>%
+    mutate(clr=ifelse(claims > badval, "red", "black"),
+           lab=ifelse(claims > labval | claims < 0, stabbr, NA))
+  # print(df)
+  return(df)
+}
+p <- pctgdp_wide %>%
+  filter(year %in% c(2000, 2005, 2010, 2018)) %>%
+  filter(stabbr!="US") %>%
+  mutate(year=factor(year)) %>%
+  ggplot(aes(year, claims)) +
+  # geom_boxplot(outlier.colour = "red", notch=TRUE, notchwidth = 0.85) +
+  #geom_boxplot(outlier.shape = NA) + geom_jitter(width = 0.1) +
+  geom_boxplot(notch=TRUE, notchwidth = 0.95, outlier.shape = NA) +
+  #  geom_point(inherit.aes=FALSE, mapping=aes(x=year, y=uflpct, colour=clr), data=f) +
+  geom_point(aes(colour=clr), data=f) +
+  geom_text(aes(label=lab), size=2.75, nudge_x=0.06, colour="darkblue", data=f) +
+  scale_colour_manual(values=c("black", "red")) +
+  geom_hline(yintercept = 0, colour="darkgrey") +
+  scale_x_discrete(name=NULL) +
+  scale_y_continuous(name="Percent", breaks=c(seq(-10, 100, 10), 25)) +
+  theme_bw() +
+  ggtitle("Unfunded liability as % of GDP") +
+  theme(legend.position = "none") +
+  geom_hline(yintercept=25, linetype="dashed", size=.6, colour="red")
+p
+ggsave(here::here("results", "badbox.png"), p, width=10, height=5, scale=1)
+
+```
+
+
+# pct GDP vs FR
+```{r pctgdpvfr, fig.width=10, fig.height=5}
+# https://luisdva.github.io/rstats/Grouping-points/
+pdata <- pctgdp_wide %>%
+  filter(year==2018)
+(uflmdn <- pdata %>% filter(stabbr!="US") %>% .$claims %>% median)
+(frmdn <- pdata %>% filter(stabbr!="US") %>% .$fr %>% median)
+
+p <- pdata %>%
+  filter(stabbr!="US", claims >= uflmdn | fr < frmdn) %>%
+  mutate(grp=case_when(stabbr %in% "IL" ~ "badall",
+                       stabbr %in% c("AK", "MS", "NM") ~ "badgdp",
+                       stabbr %in% c("CT", "KY", "MA", "NJ", "SC") ~ "badfr",
+                       TRUE ~ "notsobad"),
+         grp=factor(grp)) %>%
+  ggplot(aes(claims, fr, colour=grp, label=stabbr)) +
+  geom_point(size=0.7) +
+  geom_text_repel(size=3, fontface = "bold", point.padding = 0.005) +
+  # geom_encircle(s_shape=0.4, expand=0.16, data=function(df) subset(df, grp %in% c("badgdp"))) +
+  # groups: 1 AK MS NM badgdp, 2: IL badall
+  # settings for other groups affect an unchanged group!
+  # s_shape 0=circle-like, 1= straight lines default 0.5
+  # expand: how far to move the lines from the points default 0.05. CANNOT BE ZERO
+  # spread: default 0.1
+  geom_encircle(aes(s_shape=0,  # c(0.4, .4, 0, 0), .5
+                    expand=.05,  # .05
+                    spread=.025), # 0.1  # # size=c(0.1, 0.1, 0.1, 0.1) 1??
+                data=function(df) subset(df, grp %in% c("badall"))) +
+  geom_encircle(aes(s_shape=0.25,  # c(0.4, .4, 0, 0), .5
+                    expand=.1,  # .05
+                    spread=.5), # 0.1  # # size=c(0.1, 0.1, 0.1, 0.1) 1??
+                data=function(df) subset(df, grp %in% c("badgdp"))) +
+  geom_hline(yintercept = frmdn) +
+  geom_vline(xintercept = uflmdn) +
+  scale_y_continuous(name="Funded ratio (market assets as % of liability)", breaks=seq(0, 80, 5)) +
+  scale_x_continuous(name="Unfunded liability % of GDP", breaks=seq(0, 80, 5)) +
+  scale_color_manual(values=c("darkred", "#fd8d3c", "#f03b20", "black")) +
+  ggtitle("Funded ratio vs. Unfunded liabilities as % of GDP, 2018",
+          subtitle="States with funded ratio, or unfunded liability as % of GDP, that is worse than median") +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(caption="Note: Crosslines mark 50-state medians") +
+  theme(plot.caption = element_text(hjust=0, size=rel(.8)))
+p
+ggsave(here::here("results", "scatter.png"), p, width=11, height=4.75, scale=1, units="in")
+
+```
+
+
+# contributions
+
+```{r ustreadgap}
+levs <- c("encpsc", "encpscint", "encamort", "aec")
+labs <- c("Employer normal cost\n+ admin expense",
+          "NC+admin +\ninterest on unfunded",
+          "NC+admin +\nlevel 15-year amortization",
+          "Actual employer\ncontributions")
+
+ercfact <- tribble(
+  ~levs, ~labs, ~color, ~size,
+  "encamort", "NC+admin +\nlevel 15-year amortization", "#beaed4", .7,
+  "encpscint", "NC+admin +\ninterest on unfunded", "blue", 1.2,
+  "encpsc", "Employer normal cost\n+ admin expense", "red", 1.2,
+  "aec", "Actual employer\ncontributions", "#fdc086", .7)
+
+
+vars <- c("encpsc", "iipce", "prin")
+capt1 <- "Notes: Dotted vertical lines mark years in which BEA discount rate was lowered"
+capt2 <- "Top line reflects amortization of beginning-of-year unfunded liability, calculated anew each year."
+capt <- paste0(capt1, "\n", capt2)
+p <- pctgdp_wide %>%
+  select(year, stabbr, vars) %>%
+  filter(stabbr=="US", year>=2001) %>%
+  gather(vname, pctgdp, -year, -stabbr) %>%
+  mutate(vname=factor(vname, levels=vars %>% rev)) %>%
+  ggplot(aes(year, pctgdp, fill=vname)) +
+  geom_area(alpha=.5) +
+  geom_line(size=1.5, data=pctgdp2 %>% filter(stabbr=="US", vname=="aec", year>=2001)) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2), limits=c(2000, 2018)) +
+  scale_y_continuous(name="% of GDP", breaks=seq(0, 10, .5)) +
+  geom_vline(xintercept = 2004, linetype="dotted", colour="black") +
+  geom_vline(xintercept = 2010, linetype="dotted", colour="black") +
+  geom_vline(xintercept = 2013, linetype="dotted", colour="black") +
+  geom_hline(yintercept = 0) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  ggtitle('Actual employer contributions compared to "secure funding" contributions') +
+  annotate("text", x = 2013.5, y = 2.4, hjust=0, 
+           label = "Normal cost + admin expenses,\nplus 15-year level-dollar\namortization") +
+  annotate("text", x = 2013.5, y = 1.5, hjust=0, 
+           label = "Normal cost + admin expenses,\nplus interest on unfunded liability\n(treading water)") +
+  annotate("text", x = 2013.5, y = 0.4, hjust=0, label = "Normal cost + admin expenses") +
+  annotate("text", x = 2005.5, y = 0.57, hjust=0, angle=4, label="Actual contributions", colour = "black") +
+  theme(legend.position = "none") +
+  labs(caption=capt) +
+  theme(plot.caption = element_text(hjust=0, size=rel(.8))) +
+  scale_fill_manual(values=c("black", "#ece7f2", "#a6bddb", "#2b8cbe"))
+p # + scale_fill_manual(values=clrs)
+ggsave(here::here("results", "stackedfill.png"), p, width=10, height=4.5, scale=1.1)
+
+```
+
+
+```{r states_treadgap}
+pdata <- pctgdp_wide %>%
+  filter(year==2018, !stabbr %in% c("DC", "US")) %>%
+  select(stabbr, aec, treadgap, encpscint)
+
+interesting <- c("RI", "KY", "SD", "PA", "LA", "IN", "MI", "CT", "NY", "WI")
+clrs <- c("red", "blue", "black")
+
+p <- pdata %>%
+  mutate(grp=case_when(treadgap >= 1 ~ clrs[1],
+                       stabbr %in% interesting ~ clrs[2],
+                       TRUE ~ "black"
+                       ),
+         grp=factor(grp, levels=clrs)) %>%
+  ggplot(aes(aec, treadgap, label=stabbr)) + # put label here rather than in geom -- otherwise size control does not work right
+  geom_point(aes(colour=grp), size=0.9) +
+  # geom_text() 
+  # geom_text_repel(size=3, fontface = "bold", point.padding = .10, data=pdata %>% filter(stabbr %in% sts)) +
+  geom_text(aes(colour=grp), size=3, nudge_y=0.05, fontface = "bold", 
+            data=function(df) df %>% filter(grp != "black")) +
+  # geom_segment(aes(x = aec, y = 0, xend = aec, yend = treadgap), 
+  #                colour="red", size=0.1,
+  #                data=function(df) df %>% filter(stabbr=="IL")) +
+  geom_segment(aes(x = aec, y = 0, xend = aec, yend = treadgap, colour=grp), 
+                 size=0.2,
+                 data=function(df) df) +
+  geom_hline(yintercept = 0, linetype="solid", colour="black") +
+  geom_hline(yintercept = 1, linetype="dotted", colour="red", size=.4) +
+  scale_x_continuous(name="Actual employer contributions % of GDP", breaks=seq(0, 20, .1)) +
+  scale_y_continuous(name="Potential increase (treadwater gap) as % of GDP", breaks=seq(0, 20, .25), limits=c(0, NA)) +
+  scale_colour_manual(values=clrs) +
+  # ggtitle("Contribution increase needed to cover normal cost plus interest, compared with actual employer contributions",
+   #       subtitle="As % of GDP, 2018") +
+  theme_bw() +
+  theme(legend.position = "none") +  
+  labs(caption="Note: Labeled states have gap > 1% of GDP or are otherwise noteworthy") +
+  theme(plot.caption = element_text(hjust=0, size=rel(.8)))
+
+t1 <- "Contribution increase needed to cover normal cost plus interest on unfunded liability,"
+t2 <- "\ncompared with actual employer contributions, as % of GDP in 2018"
+p2 <- p + ggtitle(paste0(t1, t2)) 
+ggsave(here::here("results", "treadgap_scatter_narrow.png"), p2, width=7, height=4.25, scale=1.25)
+
+
+```
+
+
+# Impact of discount rate changes
+```{r}
+lwide %>%
+  filter(stabbr=="US") %>%
+  select(year, stabbr, liabeoy, claims, enc) %>%
+  group_by(stabbr) %>%
+  arrange(year) %>%
+  mutate_at(vars(-c(year, stabbr)), ~ . / lag(.) * 100 - 100)
+
+rates %>% filter(year>=2000) %>% spread(series, value)
+
+lwide %>%
+  # filter(stabbr=="US") %>%
+  filter(stabbr=="RI") %>%
+  select(year, stabbr, liabeoy, claims, enc) %>%
+  group_by(stabbr) %>%
+  arrange(year) %>%
+  mutate_at(vars(-c(year, stabbr)), ~ . / lag(.) * 100 - 100) %>%
+  select(-claims) %>%
+  gather(vname, value, -stabbr, -year) %>%
+  filter(!year %in% c(2004, 2010, 2013)) %>%
+  ggplot(aes(year, value, colour=vname)) +
+  geom_line() +
+  geom_vline(xintercept = 2004) +
+  geom_vline(xintercept = 2010) +
+  geom_vline(xintercept = 2013) +
+  geom_hline(yintercept = 0)
+
+lwide %>%
+  filter(stabbr %in% c("NH", "VT", "CO")) %>%
+  select(year, stabbr, liabeoy, claims, enc) %>%
+  group_by(stabbr) %>%
+  arrange(year) %>%
+  mutate_at(vars(-c(year, stabbr)), ~ . / lag(.) * 100 - 100) %>%
+  select(year, stabbr, enc) %>%
+  gather(vname, value, -stabbr, -year) %>%
+  # filter(!year %in% c(2004, 2010, 2013)) %>%
+  ggplot(aes(year, value, colour=stabbr)) +
+  geom_line() +
+  geom_point() +
+  geom_vline(xintercept = 2004) +
+  geom_vline(xintercept = 2010) +
+  geom_vline(xintercept = 2013) +
+  geom_hline(yintercept = 0)
+
+lwide %>%
+  select(year, stabbr, liabeoy, ass, enc) %>%
+  gather(vname, value, -year, -stabbr) %>%
+  group_by(stabbr, vname) %>%
+  arrange(year) %>%
+  mutate(pch=value / lag(value) * 100 - 100) %>%
+  filter(year>=2000) %>%
+  group_by(vname) %>%
+  do(qtiledf(.$pch))
+
+lwide %>%
+  select(year, stabbr, liabeoy, ass, enc) %>%
+  gather(vname, value, -year, -stabbr) %>%
+  group_by(stabbr, vname) %>%
+  arrange(year) %>%
+  mutate(pch=value / lag(value) * 100 - 100) %>%
+  filter(year>=2000) %>%
+  filter(vname=="enc", abs(pch) > 20)
+
+```
+
+
+# map
+```{r map_setup}
+# map
+# library(urbnmapr)
+# 
+# spatial_data <- left_join(get_urbn_map(map = "states", sf = TRUE),
+#                           pctgdp2 %>% select(state_abbv=stabbr, pctgdp),
+#                           by = "state_abbv")
+# 
+# ggplot() +
+#   geom_sf(spatial_data,
+#           mapping = aes(fill = pctgdp),
+#           color = "#ffffff", size = 0.25) +
+#   labs(fill = "Homeownership rate")
+
+
+library(maps)
+# https://cran.r-project.org/web/packages/usmap/vignettes/mapping.html
+library(usmap)
+library(gridExtra)
+
+#.. Functions ----
+theme_map <- function(base_size=9, base_family="") {
+  # see:
+  # https://socviz.co/maps.html
+  # https://github.com/kjhealy/socviz
+  require(grid)
+  theme_bw(base_size=base_size, base_family=base_family) %+replace%
+    theme(axis.line=element_blank(),
+          axis.text=element_blank(),
+          axis.ticks=element_blank(),
+          axis.title=element_blank(),
+          panel.background=element_blank(),
+          panel.border=element_blank(),
+          panel.grid=element_blank(),
+          panel.spacing=unit(0, "lines"),
+          plot.background=element_blank(),
+          legend.justification = c(0,0),
+          legend.position = c(0,0)
+    )
+}
+
+get_mdata <- function(data){
+  # df must have a column named stabbr
+  mdata <- left_join(usmap::us_map() %>% arrange(full, piece, order), 
+                     data %>% rename(abbr=stabbr),
+                     by="abbr")
+  return(mdata)
+}
+
+get_stateplot <- function(data, fillvar){
+  # data is a data frame
+  # fillvar is a character value with the name of the variable that will determine the fill color
+  mdata <- get_mdata(data)
+  # p <- ggplot(data = mdata, aes(x = long, y = lat, group = group)) +
+  p <- ggplot(data = mdata, aes(x = x, y = y, group = group)) +
+    geom_polygon(aes(fill=mdata[[fillvar]]), color = "gray90", size = 0.1, na.rm=TRUE) +
+    coord_equal() + 
+    theme_map() +
+    theme(legend.position = "right")
+  return(p)
+}
+
+# count(pctgdp2, vname) # treadgap claims enc encpsc
+
+```
+
+
+## Unfunded liabilities map
+```{r ufl_map}
+yrs <- c(2000, 2005, 2010, 2018)
+pdat <- pctgdp_wide %>% 
+  filter(stabbr %in% c("DC", state.abb), year %in% yrs) %>%
+  select(year, stabbr, claims) %>%
+  mutate(grp=cut(claims, breaks=c(-Inf, 5, 15, 25, Inf)), cutlabs=grp)
+
+pdat %>%
+  group_by(year, grp) %>%
+  summarise(n=n()) %>%
+  spread(year, n)
+
+capt <- str_wrap(paste0("Source: Author's analysis of BEA state pension estimates "), 90)
+
+colors <- c('#31a354','#f0f9e8','#feb24c','#f03b20')
+p <- get_stateplot(pdat, "grp") + 
+  scale_fill_manual(values=colors, drop=FALSE)+
+  theme(legend.position = "right") +
+  guides(fill=guide_legend(title="% of GDP")) +
+  geom_polygon(color = "black", fill=NA) +
+  facet_wrap(~year, ncol=2, dir="h") +
+  ggtitle("Unfunded liabilities as percent of GDP") +
+  theme(plot.title = element_text(size = 12, face = "bold"),
+        strip.background = element_rect(colour="lightgrey", fill=NA),
+        strip.text = element_text(size = 10, face="bold")) +
+  labs(caption=capt) +
+  theme(plot.caption = element_text(hjust=0, size=8))
+p
+
+ggsave(here::here("results", "ufl_map.png"), p, width=10, height=5, units="in", scale=1)
+
+```
+
+
+## Treadwater gap map
+```{r ufl_map}
+yrs <- c(2000, 2005, 2010, 2018)
+
+pdat <- pctgdp_wide %>% 
+  filter(stabbr %in% c("DC", state.abb), year %in% yrs) %>%
+  select(year, stabbr, treadgap) %>%
+  mutate(grp=cut(treadgap, breaks=c(-Inf, .5, 1, 1.5, Inf)), cutlabs=grp)
+
+pdat %>%
+  group_by(year, grp) %>%
+  summarise(n=n()) %>%
+  spread(year, n)
+
+capt <- str_wrap(paste0("Source: Author's analysis of BEA state pension estimates "), 90)
+
+colors <- c('#31a354','#f0f9e8','#feb24c','#f03b20')
+p <- get_stateplot(pdat, "grp") + 
+  scale_fill_manual(values=colors, drop=FALSE)+
+  theme(legend.position = "right") +
+  guides(fill=guide_legend(title="% of GDP")) +
+  geom_polygon(color = "black", fill=NA) +
+  facet_wrap(~year, ncol=2, dir="h") +
+  ggtitle("Treadwater gap as percent of GDP") +
+  theme(plot.title = element_text(size = 12, face = "bold"),
+        strip.background = element_rect(colour="lightgrey", fill=NA),
+        strip.text = element_text(size = 10, face="bold")) +
+  labs(caption=capt) +
+  theme(plot.caption = element_text(hjust=0, size=8))
+p
+
+ggsave(here::here("results", "treadgap_map.png"), p, width=10, height=5, units="in", scale=1)
+
+```
+
+
+# Rhode Island
+For each category make a RIvsUS set of graphs and a RI, US panel
+
+```{r RIliabs}
+# iclaims or iipce
+vars <- c("liabeoy", "ass", "claims", "encpsc", "iipce", "encpscint", "aec", "treadgap")
+vlabs <- c("Liability", "Assets", "Unfunded liability", "Employer normal cost plus expenses",
+           "Interest on unfunded liability", "Treadwater requirement:\nEmployer NC, expenses, plus interest",
+           "Actual employer contributions", "Treadwater gap")
+
+pctgdp_new <- pctgdp_wide %>%
+  filter(stabbr %in% c("RI", "US"), year > 1999) %>%
+  select(year, stabbr, vars) %>%
+  pivot_longer(cols=-c(year, stabbr), names_to="vname") %>%
+  pivot_wider(names_from = "stabbr") %>%
+  mutate(diff=RI - US)
+
+vnums <- c(1, 2, 3)
+p1 <- pctgdp_new %>%
+  filter(vname %in% vars[vnums]) %>%
+  select(-diff) %>%
+  pivot_longer(cols=c(RI, US), names_to="stabbr") %>%
+  mutate(vname=factor(vname, levels=vars[vnums], labels=vlabs[vnums])) %>%
+  arrange(vname) %>%
+  ggplot(aes(year, value, colour=stabbr)) +
+  geom_line() + 
+  geom_point() +
+  # geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 2004, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2010, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2013, linetype="dashed", colour="darkgrey") +
+  ggtitle("Liability, assets, and unfunded liability as % of GDP",
+          subtitle="Rhode Island and the U.S.") +
+  # facet_wrap(~vname, ncol=3, scales="free_y") +
+  facet_wrap(~vname, ncol=3) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="% of GDP", breaks=seq(0, 100, 2), limits=c(0, NA)) +
+  geom_hline(yintercept = 0, linetype="solid", colour="darkgrey") +
+  scale_colour_manual(values=c("blue", "red", "darkgreen")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5)) + 
+  theme(legend.position="bottom")
+p1
+ggsave(here::here("results", "RIUS_liab_ass_ufl.png"), p1, width=10, height=5, scale=1)
+
+vnums <- c(5, 4, 6)
+p2 <- pctgdp_new %>%
+  filter(vname %in% vars[vnums]) %>%
+  select(-diff) %>%
+  pivot_longer(cols=c(RI, US), names_to="stabbr") %>%
+  mutate(vname=factor(vname, levels=vars[vnums], labels=vlabs[vnums])) %>%
+  arrange(vname) %>%
+  ggplot(aes(year, value, colour=stabbr)) +
+  geom_line() + 
+  geom_point() +
+  # geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 2004, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2010, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2013, linetype="dashed", colour="darkgrey") +
+  ggtitle("Potential employer contribution costs as % of GDP",
+          subtitle="Rhode Island and the U.S.") +
+  # facet_wrap(~vname, ncol=3, scales="free_y") +
+  facet_wrap(~vname, ncol=3) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="% of GDP", breaks=seq(0, 100, 0.25), limits=c(0, NA)) +
+  geom_hline(yintercept = 0, linetype="solid", colour="darkgrey") +
+  scale_colour_manual(values=c("blue", "red", "darkgreen")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5)) + 
+  theme(legend.position="bottom")
+p2
+ggsave(here::here("results", "RIUS_costs.png"), p2, width=10, height=5, scale=1)
+
+
+vnums <- c(6, 7, 8)
+p3 <- pctgdp_new %>%
+  filter(vname %in% vars[vnums]) %>%
+  select(-diff) %>%
+  pivot_longer(cols=c(RI, US), names_to="stabbr") %>%
+  mutate(vname=factor(vname, levels=vars[vnums], labels=vlabs[vnums])) %>%
+  arrange(vname) %>%
+  ggplot(aes(year, value, colour=stabbr)) +
+  geom_line() + 
+  geom_point() +
+  # geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 2004, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2010, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2013, linetype="dashed", colour="darkgrey") +
+  ggtitle("Treadwater requirement, actual employer contributions, and gap as % of GDP",
+          subtitle="Rhode Island and the U.S.") +
+  # facet_wrap(~vname, ncol=3, scales="free_y") +
+  facet_wrap(~vname, ncol=3) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="% of GDP", breaks=seq(0, 100, 0.25), limits=c(0, NA)) +
+  geom_hline(yintercept = 0, linetype="solid", colour="darkgrey") +
+  scale_colour_manual(values=c("blue", "red", "darkgreen")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5)) + 
+  theme(legend.position="bottom")
+p3
+ggsave(here::here("results", "RIUS_twgap.png"), p3, width=10, height=5, scale=1)
+
+```
+
+
+
+```{r play}
+
+pctgdp_wide %>%
+  filter(stabbr != "US", year>1999) %>%
+  mutate(stgrp=ifelse(stabbr=="RI", "RI", "other")) %>%
+  group_by(year, stgrp) %>%
+  summarise(fr=median(fr)) %>%
+  ggplot(aes(x=year, y=fr, colour=stgrp)) +
+  geom_line() +
+  geom_point()
+  
+
+ppd2 %>%
+  filter(StateAbbrev=="RI") %>%
+  select(fy, PlanName, TotalPensionLiability, ActLiabilities_GASB, InvestmentReturnAssumption_GASB, ppd_id) %>% 
+  arrange(PlanName, fy) %>%
+  datatable
+
+ppd2 %>% filter(StateAbbrev=="RI") %>%
+  select(fy, StateAbbrev, GovtName, PlanName, ActFundedRatio_GASB, InvestmentReturnAssumption_GASB, ppd_id) %>% 
+  arrange(StateAbbrev, GovtName, PlanName) %>%
+  datatable
+
+
+ppd2 %>% filter(fy==2018, StateAbbrev=="RI") %>%
+  select(StateAbbrev, GovtName, PlanName, MktAssets_net, 
+         ActFundedRatio_GASB, InvestmentReturnAssumption_GASB, ppd_id, fye) %>% 
+  arrange(StateAbbrev, GovtName, PlanName) %>%
+  datatable
+
+ppd2 %>% filter(StateAbbrev=="RI") %>%
+  ggplot(aes(fy, ActFundedRatio_GASB, colour=PlanName)) +
+  geom_line() + geom_point()
+
+ppdfr %>%
+  filter(stabbr=="RI") %>%
+  select(year, ppd_id, PlanName, NormCostRate_ER, liab_act) %>%
+  group_by(year) %>%
+  summarise(liab_act=sum(liab_act)) %>%
+  ggplot(aes(year, liab_act)) + geom_line() + geom_point()
+
+lwide_all %>%
+  filter(stabbr=="RI") %>%
+  ggplot(aes(year, liabeoy)) + geom_line() + geom_point()
+
+# Ppd: aror 8.25 2001-2009, 7.5 2010-2016, 7 2017-2018
+adjust <- .11
+st <- "RI"
+ppdfr %>%
+  filter(stabbr==st) %>%
+  select(year, ppd_id, liab_act) %>%
+  left_join(ppd2 %>% 
+              select(stabbr=StateAbbrev, year=fy, plan_rate=InvestmentReturnAssumption_GASB, ppd_id) %>%
+              filter(stabbr==st)) %>%
+  group_by(year) %>%
+  summarise(liabfy=sum(liab_act), plan_rate=sum(plan_rate * 100 * liab_act, na.rm=TRUE) / liabfy) %>%
+  left_join(rates %>% filter(series=="beadr") %>% ungroup %>% select(year, beadr=value)) %>%
+  mutate(src="PPD",
+         liab_adj=liabfy + liabfy * (plan_rate - beadr) * adjust,
+         liab_lead=lead(liab_adj),
+         liabcy=ifelse(is.na(liab_lead), liab_adj, (liab_adj + liab_lead) / 2)) %>%
+  bind_rows(lwide_all %>% 
+              filter(stabbr==st) %>% 
+              select(year, liabcy=liabeoy) %>% 
+              mutate(src="BEA")) %>%
+  ggplot(aes(year, liabcy, colour=src)) +
+  geom_line() +
+  geom_point()
+
+# compare liabilities
+
+
+# lwide %>%
+#   filter(stabbr=="US") %>%
+#   ggplot(aes(year, enc)) +
+#   geom_line()
+
+
+pctgdp_wide %>%
+  filter(stabbr %in% c("RI", "US")) %>%
+  arrange(stabbr, year) %>%
+  ggplot(aes(year, liabeoy, colour=stabbr)) +
+  geom_line() + 
+  geom_point()
+
+pctgdp_wide %>%
+  filter(stabbr %in% c("RI", "US")) %>%
+  arrange(stabbr, year) %>%
+  ggplot(aes(year, ass, colour=stabbr)) +
+  geom_line() + 
+  geom_point()
+
+pctgdp_wide %>%
+  filter(stabbr %in% c("RI", "US")) %>%
+  arrange(stabbr, year) %>%
+  ggplot(aes(year, claims, colour=stabbr)) +
+  geom_line() + 
+  geom_point() +
+  geom_encircle(aes(s_shape=0.5,  # .5
+                    expand=.05,  # .05
+                    spread=.1), # 0.1 # size=1??
+                colour="black",
+                data=function(df) df %>% filter(stabbr=="RI", year %in% 2008:2011)) 
+
+pctgdp_wide %>%
+  filter(stabbr %in% c("RI", "US")) %>%
+  arrange(stabbr, year) %>%
+  ggplot(aes(year, encpsc, colour=stabbr)) +
+  geom_line() + 
+  geom_point()
+
+var <- "liabeoy"
+var <- "claims"
+var <- "enc"
+var <- "encpsc"
+var <- "treadgap"
+var <- "aec"
+var <- "ass"
+pctgdp_wide %>%
+  filter(stabbr %in% c("RI", "US")) %>%
+  select(year, stabbr, var) %>%
+  spread(stabbr, var) %>%
+  mutate(diff=RI - US) %>%
+  ggplot(aes(year, diff)) +
+  geom_line() + 
+  geom_point() +
+  geom_hline(yintercept = 0, colour="blue") +
+  ggtitle(var)
+
+
+# treadwater gap fell
+# enpsc iclaims enpscint treadgap
+vars <- c("liabeoy", "ass", "claims", "encpsc", "iclaims", "encpscint", "aec", "treadgap")
+vlabs <- c("Liability", "Assets", "Unfunded liability", "Employer normal cost plus expenses",
+           "Interest on unfunded liability", "Employer NC, expenses, plus interest",
+           "Actual employer contributions", "Treadwater gap")
+pre <- 2011
+pctgdp_wide %>%
+  filter(stabbr %in% c("RI", "US"),
+         year >= 2001) %>%
+  select(year, stabbr, vars) %>%
+  gather(vname, pctgdp, vars) %>%
+  spread(stabbr, pctgdp) %>%
+  mutate(diff=RI - US,
+         vname=factor(vname, levels=vars),
+         preval=ifelse(year <= pre, diff, NA),
+         postval=ifelse(year >= pre, diff, NA)) %>%
+  select(year, vname, preval, postval) %>% 
+  gather(prepost, diff, preval, postval) %>%
+  mutate(prepost=factor(prepost, levels=c("preval", "postval"), labels=c("Pre-reform", "Reforms\nin effect")),
+         vname=factor(vname, levels=vars, labels=vlabs)) %>%
+  ggplot(aes(year, diff, colour=prepost)) +
+  geom_line() + 
+  geom_point() +
+  geom_hline(yintercept = 0, colour="black") +
+  geom_vline(xintercept = 2008) +
+  geom_vline(xintercept = 2004, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2010, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2013, linetype="dashed", colour="darkgrey") +
+  ggtitle("Decomposing Rhode Island's improvement in treadwater gap vs. US",
+          subtitle="Lines show RI values as % of its GDP, minus US value as % of US GDP") +
+  facet_wrap(~vname, ncol=3, scales="free_y") +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="% of GDP") +
+  scale_colour_manual(values=c("blue", "red")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5))
+
+
+pctgdp2 %>%
+  filter(stabbr %in% c("RI", "US"),
+         year >= 2001,
+         vname %in% vars) %>%
+  select(year, stabbr, vname, pctgdp) %>%
+  spread(stabbr, pctgdp) %>%
+  mutate(diff=RI - US,
+         vname=factor(vname, levels=vars),
+         val=US,
+         preval=ifelse(year <= pre, val, NA),
+         postval=ifelse(year >= pre, val, NA)) %>%
+  select(year, vname, preval, postval) %>% 
+  gather(prepost, diff, preval, postval) %>%
+  mutate(prepost=factor(prepost, levels=c("preval", "postval"), labels=c("Pre-reform", "Reforms\nin effect")),
+         vname=factor(vname, levels=vars, labels=vlabs)) %>%
+  ggplot(aes(year, diff, colour=prepost)) +
+  geom_line() + 
+  geom_point() +
+  # geom_hline(yintercept = 0, colour="black") +
+  geom_vline(xintercept = 2008) +
+  geom_vline(xintercept = 2004, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2010, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2013, linetype="dashed", colour="darkgrey") +
+  ggtitle("Decomposing treadwater") +
+  facet_wrap(~vname, ncol=3, scales="free_y") +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="% of GDP") +
+  scale_colour_manual(values=c("blue", "red")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5))
+
+# dcompose single state
+vars <- c("liabeoy", "ass", "claims", "encpsc", "iclaims", "encpscint", "aec", "treadgap")
+vlabs <- c("Liability", "Assets", "Unfunded liability", "Employer normal cost plus expenses",
+           "Interest on unfunded liability", "Employer NC, expenses, plus interest",
+           "Actual employer contributions", "Treadwater gap")
+st <- "US"
+pctgdp2 %>%
+  filter(stabbr %in% c("RI", "US"),
+         year >= 2001,
+         vname %in% vars) %>%
+  select(year, stabbr, vname, pctgdp) %>%
+  filter(vname %in% c("aec", "encpscint", "treadgap")) %>%
+  ggplot(aes(year, pctgdp, colour=vname)) +
+  geom_line() + 
+  geom_point() +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 2004, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2010, linetype="dashed", colour="darkgrey") +
+  geom_vline(xintercept = 2013, linetype="dashed", colour="darkgrey") +
+  ggtitle("Decomposing treadwater gap") +
+  facet_wrap(~stabbr, ncol=2) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="% of GDP", limits=c(0, NA)) +
+  scale_colour_manual(values=c("blue", "red", "darkgreen")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5))
+
+
+```
+
+
+```{r nycheck}
+adjust <- .11
+st <- "IL"
+ppdfr %>%
+  filter(stabbr==st) %>%
+  select(year, ppd_id, liab_act) %>%
+  left_join(ppd2 %>% 
+              select(stabbr=StateAbbrev, year=fy, plan_rate=InvestmentReturnAssumption_GASB, ppd_id) %>%
+              filter(stabbr==st)) %>%
+  group_by(year) %>%
+  summarise(liabfy=sum(liab_act), plan_rate=sum(plan_rate * 100 * liab_act, na.rm=TRUE) / liabfy) %>%
+  left_join(rates %>% filter(series=="beadr") %>% ungroup %>% select(year, beadr=value)) %>%
+  mutate(src="PPD",
+         liab_adj=liabfy + liabfy * (plan_rate - beadr) * adjust,
+         liab_lead=lead(liab_adj),
+         liabcy=ifelse(is.na(liab_lead), liab_adj, (liab_adj + liab_lead) / 2)) %>%
+  bind_rows(lwide_all %>% 
+              filter(stabbr==st) %>% 
+              select(year, liabcy=liabeoy) %>% 
+              mutate(src="BEA")) %>%
+  ggplot(aes(year, liabcy, colour=src)) +
+  geom_line() +
+  geom_point()
+
+```
+
+
+
+```{r decomposition_vsUS}
+
+# save a table
+pctgdp_wide %>% 
+  filter(stabbr %in% c("RI", "US"), year %in% c(2000, 2005, 2010, 2015, 2018)) %>%
+  select(year, stabbr, vars) %>%
+  gather(vname, value, -year, -stabbr) %>%
+  spread(stabbr, value) %>%
+  mutate(diff=RI - US) %>%
+  arrange(vname, year) %>%
+  write_csv("./results/RIvsUS_pctgdp.csv")
+
+ # select(year, vname, preval, postval) %>% 
+ #  gather(prepost, diff, preval, postval) %>%
+ #  mutate(prepost=factor(prepost, levels=c("preval", "postval"), labels=c("Pre-reform", "Reforms\nin effect")),
+
+glimpse(pctgdp_wide)
+vars <- c("claims", "liabeoy", "ass", "encpscint", "encpsc", "iclaims", "treadgap", "aec")
+pre <- 2012
+pplevs <- c("preval", "postval")
+pplabs <- c("Pre 2012 reforms", "2012 Reforms\nin effect")
+decomp <- pctgdp_wide %>%
+  filter(stabbr %in% c("RI", "US"), year>=2000) %>%
+  select(year, stabbr, vars) %>%
+  gather(vname, value, -year, -stabbr) %>%
+  spread(stabbr, value) %>%
+  mutate(diff=RI - US,
+         preval=ifelse(year <= pre, diff, NA),
+         postval=ifelse(year >= pre, diff, NA)) %>%
+  select(year, vname, preval, postval) %>% 
+  gather(prepost, diff, preval, postval) %>%
+  mutate(prepost=factor(prepost, 
+                        levels=pplevs, 
+                        labels=pplabs))
+
+vars1 <- c("claims", "liabeoy", "ass")
+vlabs1 <- c("Unfunded liability", "Liability", "Assets")
+t1 <- "Rhode Island unfunded liability as % of GDP was greater than US average in the 2000s but fell below primarily because of liability declines after 2008"
+p1 <- decomp %>%
+  filter(vname %in% vars1) %>%
+  mutate(vname=factor(vname, levels=vars1, labels=vlabs1)) %>%
+  ggplot(aes(year, diff, colour=prepost)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~vname, ncol=3) +
+  ggtitle(t1) +
+  geom_vline(xintercept = 2008, linetype="dotted", colour="darkgrey") +
+  geom_hline(yintercept = 0) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="Rhode Island minus US, % of GDP") +
+  scale_colour_manual(values=c("blue", "red")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5))
+p1
+ggsave(here::here("results", "RIUS_decomp_ufl.png"), p1, width=10, height=5, scale=1)
+
+# , encpsc, iclaims, encpscint
+vars2 <- c("encpscint", "encpsc", "iclaims")
+vlabs2 <- c("Employer NC, expenses, plus interest -- i.e., treadwater requirement",
+            "Employer normal cost plus expenses",
+           "Interest on unfunded liability")
+t2 <- "Rhode Island treadwater requirement as % of GDP was greater than US average in the early-mid 2000s but fell to the average"
+st2 <- "This occurred primarily because of relative declines in interest on unfunded liability, NOT because of relative declines in normal cost"
+p2 <- decomp %>%
+  filter(vname %in% vars2) %>%
+  mutate(vname=factor(vname, levels=vars2, labels=vlabs2)) %>%
+  ggplot(aes(year, diff, colour=prepost)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~vname, ncol=3) +
+  ggtitle(t2) +
+  geom_vline(xintercept = 2008, linetype="dotted", colour="darkgrey") +
+  geom_hline(yintercept = 0) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="Rhode Island minus US, % of GDP", breaks=seq(-2, 2, .25)) +
+  scale_colour_manual(values=c("blue", "red")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5))
+p2
+ggsave(here::here("results", "RIUS_decomp_twrequire.png"), p2, width=10, height=5, scale=1)
+
+vars3 <- c("treadgap", "aec", "encpscint")
+vlabs3 <- c("Treadwater gap", "Actual employer contributions", "Employer NC, expenses, plus interest -- i.e., treadwater requirement")
+t3 <- "Rhode Island treadwater gap as % of GDP improved dramatically relative to US average"
+st3 <- "This improvement reflected (a) increases in employer contributions, and (b) declines in needed contributions that were driven by post-2008 liability reductions as discussed earlier"
+p3 <- decomp %>%
+  filter(vname %in% vars3) %>%
+  mutate(vname=factor(vname, levels=vars3, labels=vlabs3)) %>%
+  ggplot(aes(year, diff, colour=prepost)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~vname, ncol=3) +
+  ggtitle(t3, subtitle=st3) +
+  geom_vline(xintercept = 2008, linetype="dotted", colour="darkgrey") +
+  geom_hline(yintercept = 0) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="Rhode Island minus US, % of GDP", breaks=seq(-2, 2, .25)) +
+  scale_colour_manual(values=c("blue", "red")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5))
+p3
+ggsave(here::here("results", "RIUS_decomp_twgap.png"), p3, width=10, height=5, scale=1)
+
+
+# tbl
+# colnames <- str_replace(names(tbl), "\\.", "\n")
+# grob <- tableGrob(tbl, rows=NULL, cols=colnames)
+# ml <- marrangeGrob(list(p1, p2, p3, grob), nrow=2, ncol=2, top=NULL)
+#   ggsave(paste0("g_", simnum, ".png"), ml, width=13, height=7.5, units="in")
+```
+
+
+```{r decompri}
+# glimpse(pctgdp_wide)
+vars <- c("claims", "liabeoy", "ass", "encpscint", "encpsc", "iclaims", "treadgap", "aec")
+pre <- 2012
+pplevs <- c("preval", "postval")
+pplabs <- c("Pre 2012 reforms", "2012 Reforms\nin effect")
+decompri <- pctgdp_wide %>%
+  filter(stabbr %in% c("RI", "US"), year>=2000) %>%
+  select(year, stabbr, vars) %>%
+  gather(vname, value, -year, -stabbr) %>%
+  spread(stabbr, value) %>%
+  mutate(diff=RI - US,
+         preval=ifelse(year <= pre, RI, NA),
+         postval=ifelse(year >= pre, RI, NA)) %>%
+  select(year, vname, preval, postval) %>% 
+  gather(prepost, RI, preval, postval) %>%
+  mutate(prepost=factor(prepost, 
+                        levels=pplevs, 
+                        labels=pplabs))
+
+vars1 <- c("claims", "liabeoy", "ass")
+vlabs1 <- c("Unfunded liability", "Liability", "Assets")
+t1 <- "Rhode Island unfunded liability as % of GDP was greater than US average in the 2000s but fell below primarily because of liability declines after 2008"
+p1 <- decompri %>%
+  filter(vname %in% vars1) %>%
+  mutate(vname=factor(vname, levels=vars1, labels=vlabs1)) %>%
+  ggplot(aes(year, RI, colour=prepost)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~vname, ncol=3, scales="free_y") +
+  ggtitle(t1) +
+  geom_vline(xintercept = 2008, linetype="dotted", colour="darkgrey") +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="Rhode Island minus US, % of GDP") +
+  scale_colour_manual(values=c("blue", "red")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5))
+p1
+ggsave(here::here("results", "RIalone_decomp_ufl.png"), p1, width=10, height=5, scale=1)
+
+# , encpsc, iclaims, encpscint
+vars2 <- c("encpscint", "encpsc", "iclaims")
+vlabs2 <- c("Employer NC, expenses, plus interest -- i.e., treadwater requirement",
+            "Employer normal cost plus expenses",
+           "Interest on unfunded liability")
+t2 <- "Rhode Island treadwater requirement as % of GDP was greater than US average in the early-mid 2000s but fell to the average"
+st2 <- "This occurred primarily because of relative declines in interest on unfunded liability, NOT because of relative declines in normal cost"
+p2 <- decomp %>%
+  filter(vname %in% vars2) %>%
+  mutate(vname=factor(vname, levels=vars2, labels=vlabs2)) %>%
+  ggplot(aes(year, diff, colour=prepost)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~vname, ncol=3) +
+  ggtitle(t2) +
+  geom_vline(xintercept = 2008, linetype="dotted", colour="darkgrey") +
+  geom_hline(yintercept = 0) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="Rhode Island minus US, % of GDP", breaks=seq(-2, 2, .25)) +
+  scale_colour_manual(values=c("blue", "red")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5))
+p2
+ggsave(here::here("results", "RIUS_decomp_twrequire.png"), p2, width=10, height=5, scale=1)
+
+vars3 <- c("treadgap", "aec", "encpscint")
+vlabs3 <- c("Treadwater gap", "Actual employer contributions", "Employer NC, expenses, plus interest -- i.e., treadwater requirement")
+t3 <- "Rhode Island treadwater gap as % of GDP improved dramatically relative to US average"
+st3 <- "This improvement reflected (a) increases in employer contributions, and (b) declines in needed contributions that were driven by post-2008 liability reductions as discussed earlier"
+p3 <- decomp %>%
+  filter(vname %in% vars3) %>%
+  mutate(vname=factor(vname, levels=vars3, labels=vlabs3)) %>%
+  ggplot(aes(year, diff, colour=prepost)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~vname, ncol=3) +
+  ggtitle(t3, subtitle=st3) +
+  geom_vline(xintercept = 2008, linetype="dotted", colour="darkgrey") +
+  geom_hline(yintercept = 0) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, 2020, 2)) +
+  scale_y_continuous(name="Rhode Island minus US, % of GDP", breaks=seq(-2, 2, .25)) +
+  scale_colour_manual(values=c("blue", "red")) +
+  theme_bw() +
+  guides(colour=guide_legend(title=NULL)) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5))
+p3
+ggsave(here::here("results", "RIUS_decomp_twgap.png"), p3, width=10, height=5, scale=1)
+
+
+# tbl
+# colnames <- str_replace(names(tbl), "\\.", "\n")
+# grob <- tableGrob(tbl, rows=NULL, cols=colnames)
+# ml <- marrangeGrob(list(p1, p2, p3, grob), nrow=2, ncol=2, top=NULL)
+#   ggsave(paste0("g_", simnum, ".png"), ml, width=13, height=7.5, units="in")
+
+
+
+
+```
+
+
+# quick looks
+```{r}
+# pctgdp2
+# count(pctgdp2, vname)
+# xcf=
+
+
+
+```
+
+
+
+

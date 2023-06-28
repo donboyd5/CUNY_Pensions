@@ -61,8 +61,6 @@ fofq <- df  |>
 #| eval: true
 #| include: true
 #| echo: false
-#| fig-width: 11
-#| fig-height: 6
 
 gtitle1 <- "Equity-like investments as percentage of invested assets"
 gtitle2 <- "State and local government and private sector defined benefit pension plans"
@@ -89,4 +87,6 @@ p
 ggsave(here::here("results", "equity_shares.png"), plot=p, height=6, width=11, scale=1)
 
 ```
+
+
 

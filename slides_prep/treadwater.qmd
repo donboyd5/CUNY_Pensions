@@ -1,0 +1,256 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Treading water
+
+What contributions are required to tread water - to keep unfunded liabilities from rising?
+
+
+```{r}
+#| label: setup
+#| eval: true
+#| include: false
+#| echo: false
+
+source(here::here("r", "libraries.r"))
+
+library(bea.R)
+beakey <- "21F782AD-56A6-439D-B3D5-9A592F020E26"
+
+```
+
+
+```{r}
+#| label: bea-treadwater-data
+#| eval: true
+#| include: false
+#| echo: false
+
+pmt <- function(p, i, n, end = FALSE){
+  # amortization function with constant payment at each period
+  # p = principle, i = interest rate, n = periods.
+  # end: , if TRUE, payment at the end of period.
+  if(end) p <- p*(1 + i)
+  a_n <- (1 - (1 + i)^(-n))/(1 - 1/(1 + i))
+  pmt <- p / a_n
+  return(pmt)  
+}
+
+usgdp <- readRDS(here::here("data", "tab1.1.5gdp.rds")) |> 
+  filter(line==1) |> 
+  select(year, gdp=value) |> 
+  mutate(stabbr="US")
+skim(usgdp)
+
+sgdp <- readRDS(here::here("data", "sgdp.rds")) |>
+  select(stabbr, year, gdp)
+
+count(sgdp, year) |> ht()
+
+gdp <- bind_rows(
+  usgdp |> mutate(src="US"),
+  sgdp |> mutate(src="states")
+  )
+
+gdp |> 
+  filter(stabbr=="US", year>=1997) |> 
+  pivot_wider(names_from = src, values_from = gdp) # values are the same
+
+
+stlpen <- readRDS(here::here("data", "stlpensions_bea.rds"))
+glimpse(stlpen)
+count(stlpen, line, desc)
+count(stlpen, stabbr) # gulp 5632 NA -- must be regions
+
+stlpen |> 
+  filter(year==2000, stabbr=="NY") |> 
+  select(stabbr, line, vname, desc, value)
+
+pdata1 <- stlpen |> 
+  filter(!is.na(stabbr)) |> 
+  select(stabbr, vname, desc, year, value) |> 
+  filter(vname %in% c("aec", "enc", "psc", "claims", "iipce", "ben", "ass", "liabeoy")) |> 
+  select(stabbr, year, vname, value) |> 
+  pivot_wider(names_from = vname)
+
+pdata1 |> filter(stabbr=="NY", year=="2000")
+
+# The discount rate was 6 percent for 2000 to 2003, 5.5 percent for 2004 to 2009, 5 percent for 2010 to 2012, and 4 percent from 2013 to 2018
+
+pdatalevs <- pdata1 |>
+  # filter(stabbr=="US") |> 
+  left_join(gdp |> 
+              filter(src=="states") |> 
+              select(-src), 
+            by = join_by(stabbr, year)) |> 
+  relocate(gdp, .after=year) |> 
+  arrange(stabbr, year) |>
+  mutate(claims_lag = lag(claims), .by=c(stabbr)) |> 
+  mutate(beadr=case_when(year %in% 2000:2003 ~ .06,
+                         year %in% 2004:2009 ~ .055,
+                         year %in% 2010:2012 ~ .05,
+                         year %in% 2013:2018 ~ .04,
+                         year %in% 2019:2023 ~ .04, # assumed
+                         TRUE ~ NA_real_),
+         iclaims=claims_lag * beadr, # this is not quite the same as iipce in the DR change years; it should be
+         amort=pmt(claims_lag, beadr, 15),
+         encpsc=enc + psc,
+         encpscint=encpsc + iipce,
+         treadgap=encpscint - aec,
+         encamort=encpsc + amort,
+         prin=amort - iipce,
+         fullgap=encamort - aec)
+
+pdatalevs |> filter(stabbr=="NY", year=="2001")
+
+pdatapct <- pdatalevs |> 
+  mutate(across(c(-year, -stabbr, -beadr, -gdp), ~ . / (gdp * 1000)))
+
+pdatapct |> filter(stabbr=="NY", year=="2001")
+
+pdata <- bind_rows(
+  pdatalevs |> mutate(type="level"),
+  pdatapct |> mutate(type="pct")) |> 
+  relocate(type, .after = stabbr) |> 
+  arrange(type, stabbr, year)
+
+pdata
+pdata |> filter(stabbr=="US", year>=2000) |> select(year, stabbr, type, aec)
+pdata |> filter(stabbr=="US", year>=2000) |> select(year, stabbr, type, aec, encpscint, treadgap, encamort, fullgap)
+
+```
+
+
+```{r}
+#| label: bea-treadwater-plot
+#| eval: true
+#| include: true
+#| echo: false
+
+levs <- c("encpsc", "encpscint", "encamort", "aec")
+labs <- c("Employer normal cost\n+ admin expense",
+          "NC+admin +\ninterest on unfunded",
+          "NC+admin +\nlevel 15-year amortization",
+          "Actual employer\ncontributions")
+
+ercfact <- tribble(
+  ~levs, ~labs, ~color, ~size,
+  "encamort", "NC+admin +\nlevel 15-year amortization", "#beaed4", .7,
+  "encpscint", "NC+admin +\ninterest on unfunded", "blue", 1.2,
+  "encpsc", "Employer normal cost\n+ admin expense", "red", 1.2,
+  "aec", "Actual employer\ncontributions", "#fdc086", .7)
+
+
+vars <- c("encpsc", "iipce", "prin")
+capt1 <- "Notes: Dotted vertical lines mark years in which BEA discount rate was lowered"
+capt2 <- "Top line reflects amortization of beginning-of-year unfunded liability, calculated anew each year."
+capt <- paste0(capt1, "\n", capt2)
+
+startyear <- 2001
+endyear <- 2021
+p <- pdata |>
+  select(year, stabbr, type, all_of(vars)) |> 
+  filter(stabbr=="US", type=="pct", year>=startyear) |> 
+  pivot_longer(cols=-c(year, stabbr, type), names_to="vname", values_to="pctgdp") |> 
+  mutate(vname=factor(vname, levels=vars %>% rev)) |> 
+  ggplot(aes(year, pctgdp, fill=vname)) +
+  geom_area(alpha=.5) +
+  geom_line(size=1.5, 
+            data=pdata |> 
+              filter(stabbr=="US", type=="pct", year>=startyear) |> 
+              mutate(vname="aec") |> 
+              select(year, stabbr, vname, pctgdp=aec)) +
+  scale_x_continuous(name=NULL, breaks=seq(2000, endyear, 2), limits=c(startyear, endyear)) +
+  scale_y_continuous(name="% of GDP", breaks=seq(0, 1, .005), labels=label_percent(accuracy=.1)) +
+  geom_vline(xintercept = 2004, linetype="dotted", colour="black") +
+  geom_vline(xintercept = 2010, linetype="dotted", colour="black") +
+  geom_vline(xintercept = 2013, linetype="dotted", colour="black") +
+  geom_hline(yintercept = 0) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  ggtitle('Actual employer contributions compared to "secure funding" contributions') +
+  annotate("text", x = 2013.5, y = .024, hjust=0,
+           label = "Normal cost + admin expenses,\nplus 15-year level-dollar\namortization") +
+  annotate("text", x = 2013.5, y = .015, hjust=0,
+           label = "Normal cost + admin expenses,\nplus interest on unfunded liability\n(treading water)") +
+  annotate("text", x = 2013.5, y = 0.004, hjust=0, label = "Normal cost + admin expenses") +
+  annotate("text", x = 2005.5, y = 0.0057, hjust=0, angle=4, label="Actual contributions", colour = "black") +
+  theme(legend.position = "none") +
+  labs(caption=capt) +
+  theme(plot.caption = element_text(hjust=0, size=rel(.8))) +
+  scale_fill_manual(values=c("black", "#ece7f2", "#a6bddb", "#2b8cbe"))
+p # + scale_fill_manual(values=clrs)
+ggsave(here::here("results", "stackedfill.png"), p, width=11, height=6, scale=1)
+
+```
+
+
+
+```{r}
+#| label: treadwater-table
+#| eval: true
+#| include: true
+#| echo: false
+
+pdata
+count(pdata, year)
+
+# when, for US as a whole, was the treadwater gap largest?
+pdata |> 
+  filter(type=="pct", stabbr=="US") |> 
+  ggplot(aes(year, treadgap)) +
+  geom_line() +
+  geom_point()
+# 2009
+
+# which states have the greatest required increase in contributions as % of gdp
+pdata |> 
+  filter(type=="pct", year==2021) |> 
+  mutate(stname=stname(stabbr)) |> 
+  select(stabbr, stname, aec, ben, liabeoy, claims, encpscint, treadgap, fullgap) |> 
+  arrange(desc(treadgap))
+
+gapranks <- pdata |> 
+  filter(type=="pct", year==2021) |>
+  select(stabbr, treadgap, fullgap) |> 
+  mutate(across(c(treadgap, fullgap), ~ ifelse(stabbr=="US", NA_real_, rank(desc(.x))), .names="{.col}_rank")) |> 
+  arrange(desc(treadgap))
+
+# how large are those required contribution increases, and how much did they increase them already?
+pdata |> 
+  filter(type=="level", year %in% c(2009, 2021),
+         stabbr %in% (c(gapranks |> filter(treadgap_rank<=10) |> pull(stabbr),
+                        "US"))) |> 
+  select(stabbr, year, aec, encpscint, treadgap) |> 
+  pivot_wider(names_from=year, values_from = c(aec, encpscint, treadgap)) |> 
+  mutate(pct_2009=treadgap_2009 / aec_2009,
+         pct_2021=treadgap_2021 / aec_2021,
+         aecchange=aec_2021 - aec_2009,
+         aecpch=aec_2021 / aec_2009 - 1,
+         stname=stname(stabbr)) |> 
+  select(stabbr, stname, aec_2021, aecchange, treadgap_2021, encpscint_2021, aecpch, pct_2021) |> 
+  arrange(desc(pct_2021))
+  
+sts <- c("NM", "MS", "NV", "IL", "HI", "CA", "CT")
+pdata |> 
+  filter(type=="pct", stabbr %in% c(sts, "US")) |> 
+  ggplot(aes(year, treadgap, colour=stabbr)) +
+  geom_line() +
+  geom_point()
+
+pdata |> 
+  filter(type=="pct", stabbr %in% c(sts, "US")) |> 
+  ggplot(aes(year, aec, colour=stabbr)) +
+  geom_line() +
+  geom_point()
+
+# levels get change in contributions made and required
+
+
+
+```
+
+

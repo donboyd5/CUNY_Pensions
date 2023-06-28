@@ -257,3 +257,272 @@ ggsave(here::here("results", "rates.png"), plot=p, height=6, width=11, unit="in"
 # update.packages(ask = FALSE, checkBuilt = TRUE)
 
 ```
+
+## IRS Funding Segment Rates
+
+### Bard
+
+The IRS Funding Segment Rates are used to determine the present value of benefits under defined benefit pension plans. The rates are different under IRC 404(o), 417(E), and 430(h) because they are used for different purposes.
+
+-   **IRC 404(o)** rates are used to determine the minimum funding requirements for single-employer plans. These rates are based on the 25-year average segment rates, but they are adjusted to be within certain minimum and maximum percentages.
+
+-   **IRC 417(E)** rates are used to determine the minimum present value of benefits for participants in defined benefit plans. These rates are based on the 24-month average segment rates, but they are adjusted to be within certain minimum and maximum percentages.
+
+-   **IRC 430(h)** rates are used to determine the present value of benefits for purposes of calculating the funding target attainment percentage (FTAP) and the target normal cost. These rates are based on the 24-month average segment rates, but they are not adjusted to be within any minimum or maximum percentages.
+
+Here is a table summarizing the differences between the three sets of rates:
+
+| **IRC Section** | **Purpose**                                               | **Rates**                                                                             |
+|:-----------------|:---------------------|:--------------------------------|
+| 404(o)          | Minimum funding requirements                              | 25-year average segment rates, adjusted to be within minimum and maximum percentages  |
+| 417(E)          | Minimum present value of benefits                         | 24-month average segment rates, adjusted to be within minimum and maximum percentages |
+| 430(h)          | Present value of benefits for FTAP and target normal cost | 24-month average segment rates, not adjusted                                          |
+
+For each category, there are three segment rates:
+
+-   **Segment Rate 1:** This rate is used to determine the present value of benefits that are projected to be paid within 10 years.
+
+-   **Segment Rate 2:** This rate is used to determine the present value of benefits that are projected to be paid between 10 and 20 years.
+
+-   **Segment Rate 3:** This rate is used to determine the present value of benefits that are projected to be paid after 20 years.
+
+The differences between the three rates are the time periods over which they are used to determine the present value of benefits. Segment Rate 1 is used for benefits that are projected to be paid within the next 10 years, Segment Rate 2 is used for benefits that are projected to be paid between 10 and 20 years, and Segment Rate 3 is used for benefits that are projected to be paid after 20 years.
+
+The segment rate that is likely to apply to the greatest share of pension liability is Segment Rate 2. This is because most pension plans have a large number of participants who are nearing retirement age, and their benefits are projected to be paid within the next 20 years.
+
+Here is a table summarizing the differences between the three segment rates:
+
+| **Segment Rate** | **Time Period**                       |
+|:-----------------|:--------------------------------------|
+| 1                | Benefits paid within 10 years         |
+| 2                | Benefits paid between 10 and 20 years |
+| 3                | Benefits paid after 20 years          |
+
+### ChatGPT
+
+Yes, the rates you're referring to are generally defined in both accounting standards and law. Here's how they can be more formally referred to:
+
+1\. The **discount rate used to determine liability for financial reporting** purposes is often referred to as the "**discount rate for projected benefit obligation (PBO)**". This is defined by the Financial Accounting Standards Board (FASB) under Accounting Standards Codification (ASC) Topic 715, which deals with Compensation --- Retirement Benefits.
+
+2\. The discount rate used for funding purposes is often referred to as the "**funding target discount rate**" or "minimum funding standard discount rate." This rate is based on segment rates defined under the Internal Revenue Code (IRC) Section 430(h), which specifies the way these rates are calculated. It was part of the Pension Protection Act of 2006.
+
+3\. The assumed investment rate of return used for plan investment purposes does not have a standard formal name and can vary between plans, but it can be referred to as the "**expected return on plan assets**." It is the estimated rate of return on the plan's invested assets, based on the plan's investment strategy and the anticipated performance of the market.
+
+## Relationship to Form 5500
+
+### Bard
+
+1.  **The discount rate used to determine liability for financial reporting purposes** is also known as the **actuarial present value discount rate** or the **plan liability discount rate**. It is the rate used to discount future pension obligations to their present value for financial reporting purposes. The discount rate is typically based on the yields of high-quality corporate bonds.
+
+2.  **The discount rate used for funding purposes** is also known as the **funding standard account discount rate** or the **430 discount rate**. It is the rate used to discount future pension obligations to their present value for funding purposes. The discount rate is typically based on the yields of high-quality corporate bonds, but it is subject to certain statutory limits.
+
+3.  **The assumed investment rate of return used for plan investment purposes** is also known as the **plan asset return assumption** or the **404(a)(1) return assumption**. It is the rate of return that the plan sponsor assumes will be earned on plan assets over the long term. The assumed investment rate of return is used to calculate the expected future value of plan assets.
+
+All three of these rates are reported on the U.S. Department of Labor's Form 5500. The discount rate used for financial reporting purposes is reported on Schedule H, Part I, Line 12. The discount rate used for funding purposes is reported on Schedule I, Part I, Line 9. The assumed investment rate of return is reported on Schedule H, Part I, Line 13.
+
+### ChatGPT
+
+As for your question about the U.S. Department of Labor's Form 5500:
+
+1\. The discount rate for projected benefit obligation (PBO) used for financial reporting purposes is not directly reported on Form 5500, but it **can be derived from Schedule SB (Single-Employer Defined Benefit Plan Actuarial Information) Part III line 15** - it's the rate used for the 3rd segment for the 24-month average.
+
+2\. The funding target discount rate, or minimum funding standard discount rate, is reported on Form 5500, **Schedule SB, Part III, line 15**. This provides the effective interest rates for funding purposes, broken out into three segments.
+
+3\. The expected return on plan assets is not directly reported on the Form 5500. It could be derived from actuarial assumptions and investment return information contained in the Form 5500 series returns and attachments, but this would require some estimation.
+
+Note that Form 5500 and its related Schedules can change over time, so it's important to look at the correct version for the year you are interested in. As of my training data through September 2021, this is the most accurate information I can provide. For more up-to-date or detailed information, you may need to consult the actual forms, the DOL, or a financial advisor.
+
+## Relationship to plan funding requirements
+
+### Bard
+
+The main difference between the funding standard account discount rate and the assumed investment rate of return is that the funding standard account discount rate is used to determine how much money the plan sponsor must contribute to the plan, while the assumed investment rate of return is used to calculate the expected future value of plan assets.
+
+The funding standard account discount rate is a statutory minimum rate that is set by the Internal Revenue Code (IRC). The plan sponsor must contribute enough money to the plan to ensure that the plan's assets will be sufficient to pay all of its future obligations, discounted at the funding standard account discount rate.
+
+The assumed investment rate of return is a rate that is chosen by the plan sponsor, and it is not subject to any statutory limits. The assumed investment rate of return is used to calculate the expected future value of plan assets, which is then used to determine the amount of the plan sponsor's annual contribution.
+
+In general, the funding standard account discount rate will be lower than the assumed investment rate of return. This is because the funding standard account discount rate is designed to ensure that the plan's assets will be sufficient to pay all of its future obligations, even if investment returns are lower than expected.
+
+However, the funding standard account discount rate can also be higher than the assumed investment rate of return. This can happen if the plan's liabilities are very large, or if the plan sponsor is facing financial difficulties.
+
+Ultimately, the amount of money that the plan sponsor must contribute to the plan is determined by the funding standard account discount rate. However, the assumed investment rate of return is also used to calculate the expected future value of plan assets, which can have an impact on the amount of the plan sponsor's contribution.
+
+### ChatGPT
+
+The funding target discount rate and the expected return on plan assets are two different rates used in pension plan calculations, and they serve different purposes.
+
+1\. \*\***Funding Target Discount Rate**:\*\* This is used to calculate the present value of future pension obligations, also known as the plan's "funding target". The funding target is the present value of all benefits accrued or earned by the plan's participants as of the beginning of the plan year. The discount rate is used to bring these future payments back to a present value. In essence, it is used to calculate how much the pension plan owes in today's dollars. The higher the discount rate, the lower the present value of the future obligations, and vice versa.
+
+The funding target discount rate is defined by the Internal Revenue Code (IRC) Section 430(h) and it's used to determine the minimum required contribution that the plan sponsor must make to the plan. This is because the funding target forms part of the basis for the legally required contributions under ERISA and the IRC. If the plan's assets fall short of the funding target, the plan sponsor is generally required to make contributions to make up the shortfall over a period of years.
+
+2\. \*\***Expected Return on Plan Assets**:\*\* This is an estimate of what the plan expects to earn on its investments. This expected return impacts the cost of the pension plan from an accounting perspective because it affects the plan's reported pension expense. When a pension plan calculates its pension expense for financial reporting purposes, it includes the expected return on plan assets as an offset against the cost of the plan.
+
+**It's important to note that the expected return on plan assets does not affect the minimum required contribution that the plan sponsor must make.** It might influence how much a plan sponsor chooses to contribute above the minimum, or how the plan sponsor invests the plan assets, but the minimum required contribution is determined based on the funding target and the plan's actual assets, not the expected return.
+
+In conclusion, the funding target discount rate is used to determine how much money the plan sponsor must contribute to the plan, not the expected return on plan assets.
+
+## more
+
+### Bard
+
+The funding standard account discount rate is a statutory minimum rate, but it can vary based on plan demographics or other factors. The IRC specifies that the funding standard account discount rate must be based on the yields of high-quality corporate bonds, but it also allows for certain adjustments to be made based on the plan's demographics. For example, the funding standard account discount rate can be adjusted to reflect the age of the plan participants, the plan's liabilities, and the plan's assets.
+
+In addition, the IRS has the authority to set the funding standard account discount rate for certain plans. For example, the IRS has set a special funding standard account discount rate for plans that are in critical and declining status.
+
+As a result, the funding standard account discount rate can vary from plan to plan. However, the statutory minimum rate will always be the starting point for determining the funding standard account discount rate.
+
+Here are some of the factors that can affect the funding standard account discount rate:
+
+-   The age of the plan participants
+
+-   The plan's liabilities
+
+-   The plan's assets
+
+-   The plan's funding status
+
+-   The current interest rate environment
+
+The funding standard account discount rate is an important factor in determining how much money a plan sponsor must contribute to a defined benefit plan. By understanding the factors that can affect the funding standard account discount rate, plan sponsors can better understand their funding obligations and make informed decisions about their plan's future.
+
+The impact of the assumed investment rate of return on required contributions relative to the funding standard account discount rate can vary depending on the plan's specific circumstances. However, in general, the assumed investment rate of return is likely to have a smaller impact on required contributions than the funding standard account discount rate.
+
+This is because the funding standard account discount rate is a statutory minimum rate that is designed to ensure that the plan's assets will be sufficient to pay all of its future obligations, even if investment returns are lower than expected. The assumed investment rate of return, on the other hand, is a rate that is chosen by the plan sponsor, and it is not subject to any statutory limits.
+
+As a result, the funding standard account discount rate is likely to have a larger impact on required contributions than the assumed investment rate of return. For example, if the funding standard account discount rate is 6% and the assumed investment rate of return is 7%, the required contribution will be based on the 6% discount rate, even though the plan sponsor may have assumed that the plan's assets would grow at a 7% rate.
+
+However, the assumed investment rate of return can still have a significant impact on required contributions. For example, if the funding standard account discount rate is 6% and the assumed investment rate of return is 5%, the required contribution will be 20% higher than if the assumed investment rate of return were 6%.
+
+Ultimately, the impact of the assumed investment rate of return on required contributions will depend on a number of factors, including the plan's specific circumstances, the funding standard account discount rate, and the plan sponsor's assumptions about future investment returns.
+
+### ChatGPT
+
+The funding target discount rate is a function of the interest rates on high-quality corporate bonds, and it is meant to approximate the rate at which the plan could effectively settle its obligations. As it's based on market rates, it is not directly influenced by a particular plan's demographics or other individual factors.
+
+The Pension Protection Act of 2006 introduced the concept of using segment rates to determine the minimum funding standards for pension plans. These segment rates are based on the average yields of a range of corporate bonds, divided into three segments based on the length of time until the benefits are payable.
+
+1\. The first segment rate is for benefits payable within 5 years.
+
+2\. The second segment rate is for benefits payable in 5-15 years.
+
+3\. The third segment rate is for benefits payable in more than 15 years.
+
+The applicable segment rates for a given plan year are the average of these rates over a 24-month period ending in the prior year.
+
+So, while the methodology for determining the discount rate is the same for all plans, the actual rates used for a specific plan will depend on the timing of the plan's liabilities. In other words, the proportions of the plan's liabilities that fall into each of the three segments will depend on the plan's demographics, and this will impact the weighted-average discount rate for the plan's liabilities. This means that, while the segment rates themselves do not vary by plan, the effective discount rate used by a specific plan (which is a blend of the segment rates) could vary based on the plan's liability structure.
+
+It's also important to note that while the IRS provides these segment rates, plan sponsors may use a different rate (within certain boundaries) for the purposes of calculating lump sum distributions or other optional forms of benefit.
+
+### IRC 404(o) and IRC 430(h) rates
+
+The IRC 404(o) and IRC 430(h) funding rates are two different methods used to determine the present value of a defined benefit pension plan's liabilities for financial reporting and funding purposes, respectively.
+
+The IRC 404(o) funding rate is based on the yields of high-quality corporate bonds, while the IRC 430(h) funding rate is based on a set of segment rates that are updated every quarter by the Internal Revenue Service (IRS). The IRC 430(h) funding rate is generally lower than the IRC 404(o) funding rate, which means that plans are required to contribute more money to the plan under the IRC 430(h) funding rate.
+
+The difference between the two funding rates is due to the fact that the IRC 430(h) funding rate is designed to ensure that plans are adequately funded, even if investment returns are lower than expected. The IRC 404(o) funding rate, on the other hand, is designed to be more consistent with the financial reporting requirements of the plan.
+
+In general, the IRC 430(h) funding rate is used for funding purposes, while the IRC 404(o) funding rate is used for financial reporting purposes. However, there are some exceptions to this rule. For example, plans that are in critical and declining status are required to use the IRC 430(h) funding rate for financial reporting purposes.
+
+The following table summarizes the key differences between the two funding rates:
+
+| **Feature**      | **IRC 404(o) Funding Rate**            | **IRC 430(h) Funding Rate** |
+|:-----------------|:---------------------------------------|:----------------------------|
+| Purpose          | Financial reporting                    | Funding                     |
+| Basis            | Yields of high-quality corporate bonds | Segment rates               |
+| Maturity         | All maturities                         | Different maturities        |
+| Update frequency | Annually                               | Quarterly                   |
+| Typical value    | Higher                                 | Lower                       |
+
+The 430(h) rates were not reported or required for plan years between 2000 and 2006. Instead, the 401(a)(17) rates were used for funding purposes.
+
+The 401(a)(17) rates are a set of fixed rates that are updated annually by the IRS. The rates are based on the yields of high-quality corporate bonds. The 401(a)(17) rates are generally higher than the IRC 430(h) rates, which means that plans were required to contribute less money to the plan under the 401(a)(17) rates.
+
+The following table shows the 401(a)(17) rates for plan years between 2000 and 2006:
+
+| **Year** | **401(a)(17) Rate** |
+|:---------|:--------------------|
+| 2000     | 7.50%               |
+| 2001     | 7.25%               |
+| 2002     | 7.00%               |
+| 2003     | 6.75%               |
+| 2004     | 6.50%               |
+| 2005     | 6.25%               |
+| 2006     | 6.00%               |
+
+## MAP and HAFTA (chatGPT)
+
+*When thinking about private defined benefit pension plan funding rates, IRC section 430(h) funding segment rates are important. I have seen reference to rates in the 2013 and 2014 period generally referred to as HATFA or MAP rates. Do you know what these rates might be?*
+
+HATFA stands for the Highway and Transportation Funding Act of 2014. This Act included provisions that allowed pension plan sponsors to use higher interest rates to calculate their funding obligations, effectively lowering the present value of future pension liabilities. This was largely a response to the historically low interest rates during that period, which had increased pension plan liabilities and thereby the required contributions from plan sponsors.
+
+Similarly, MAP-21 refers to the Moving Ahead for Progress in the 21st Century Act, signed into law in 2012. This law also provided pension funding relief by establishing a corridor around the 25-year average of the segment rates used to calculate pension liabilities.
+
+## Start of data
+
+```{r}
+#| label: get-irs-rates
+#| eval: false
+#| include: false
+#| echo: false
+
+drates <- here::here("data", "irs_rates")
+fn <- "irsrates.xlsx"
+
+cnames1999 <- read_csv("
+cname, desc                   
+date,
+t30, rate for 415/417(e) minimum present value of benefits
+ipgbcpvvb, rate for present value of vested benefits for PBGC variable premium
+iterm, termination rate - PBGC Immediate Annuity Rates
+iobra87min,
+iobra87mid,
+iobra87max, 
+irpa1994max, RPA 1994 Max Rate
+ilate, rate for late charges for missed quarterly contributions
+ieecdb, rate for accumulating employee contributions in Defined Benefit Plans
+")
+cnames1999
+df1 <- read_excel(path(drates, fn), 
+                  sheet="1996-1999",
+                  range="B16:K59",
+                  col_names = cnames1999$cname,
+                  col_types = "text")
+glimpse(df1)
+df1
+
+xldate(df1$date)
+
+
+
+
+cnames2006 <- read_csv("
+cname, desc                   
+date,
+t30, rate for 415/417(e) minimum present value of benefits
+icorpbond, composite corporate bond rate
+ipgbcpvvb, rate for present value of vested benefits for PBGC variable premium
+iterm, termination rate - PBGC Immediate Annuity Rates
+iobra87min,
+iobra87mid,
+iobra87max, 
+irpa1994max, RPA 1994 Max Rate
+icorpbondmin, Corporate Bond Weighted Average Interest Rates Permissible Range min
+icorpbondmax, Corporate Bond Weighted Average Interest Rates Permissible Range max
+ilate, rate for late charges for missed quarterly contributions
+ieecdb, rate for accumulating employee contributions in Defined Benefit Plans
+")
+cnames2006
+df2 <- read_excel(path(drates, fn), 
+                  sheet="2000-2006",
+                  range="B13:N102",
+                  col_names = cnames2006$cname,
+                  col_types = "text")
+glimpse(df2)
+df2
+
+bind_rows(df1, df2)
+
+
+
+```

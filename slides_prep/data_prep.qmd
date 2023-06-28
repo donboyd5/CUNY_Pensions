@@ -14,18 +14,78 @@ editor_options:
 
 source(here::here("r", "libraries.r"))
 
-glimpse(fof)
+library(bea.R)
+beakey <- "21F782AD-56A6-439D-B3D5-9A592F020E26"
+
+fstabbr <- function(stname){
+  factor(stname,
+         levels=c("United States",
+                  state.name,
+                  "District of Columbia"),
+         labels=c("US", state.abb, "DC"))
+}
 
 # data(package="fof")
 # glimpse(fofdict_all)
 
 ```
 
+## BEA discount rates
+
+See the [July 2020 SCB article](https://apps.bea.gov/scb/issues/2020/07-july/0720-state-pension-estimates.htm) ([pdf](https://apps.bea.gov/scb/issues/2020/07-july/pdf/0720-state-pension-estimates.pdf)).
+
+The discount rate was 6 percent for 2000 to 2003, 5.5 percent for 2004 to 2009, 5 percent for 2010 to 2012, and 4 percent from 2013 to 2018 (table 2).
+
+![](images/ScreenHunter_3067%20Jun.%2025%2006.45.png){width="720" height="152"}
+
+From p.10-10 of:
+
+U.S. Bureau of Economic Analysis (BEA). "NIPA Handbook: Concepts and Methods of the U.S. National Income and Product Accounts." U.S. Bureau of Economic Analysis (BEA), December 2022. <https://www.bea.gov/resources/methodologies/nipa-handbook>.
+
+> For privately sponsored defined benefit plans, estimates of employers' normal costs are based on actuarial estimates of employers' normal costs provided by the PBGC from data collected on IRS form 5500. The PBGC adjusts the estimates to include administrative expenses, and BEA adjusts the PBGC estimates to reflect a common discount rate based on the **average AAA corporate bond rate published by Moody's** Investors Service.
+>
+> ...
+>
+> For state and local employee defined benefit pension plans, the estimates of employers' normal costs are based on the service costs and employee contribution data reported in state and local government financial reports. BEA adjusts the estimates to reflect the **same discount rate that is used for measures of privately sponsored defined benefit plans**. Separate measures of administrative expenses are based on Census Bureau data.
+
+Also see the [summary of methodologies](https://apps.bea.gov/scb/issues/2022/11-november/pdf/1122-nipa-methodologies.pdf).
+
+```{r}
+
+df <- readRDS(here::here("beameeting", "rates_a.rds"))
+glimpse(df)
+count(df, series)
+df |> filter(series=="beadr")
+
+#   series  year value
+#    <chr>  <dbl> <dbl>
+#  1 beadr   2000   6  
+#  2 beadr   2001   6  
+#  3 beadr   2002   6  
+#  4 beadr   2003   6  
+#  5 beadr   2004   5.5
+#  6 beadr   2005   5.5
+#  7 beadr   2006   5.5
+#  8 beadr   2007   5.5
+#  9 beadr   2008   5.5
+# 10 beadr   2009   5.5
+# 11 beadr   2010   5  
+# 12 beadr   2011   5  
+# 13 beadr   2012   5  
+# 14 beadr   2013   4  
+# 15 beadr   2014   4  
+# 16 beadr   2015   4  
+# 17 beadr   2016   4  
+# 18 beadr   2017   4  
+# 19 beadr   2018   4  
+
+
+
+```
 
 ## Flow of funds
 
 This section maps selected Flow of Funds variable names to names I use in other parts of this program.
-
 
 ```{r}
 #| label: fof-map
@@ -68,7 +128,6 @@ vnames
 
 ```
 
-
 ```{r}
 #| label: fof-data
 #| eval: false
@@ -85,10 +144,9 @@ saveRDS(df, here::here("data", "fofextract.rds"))
 
 ```
 
-
 ## State and local retirement funds, by state, from the FRB
 
-See: 
+See:
 
 -   https://www.federalreserve.gov/releases/z1/dataviz/pension/
 
@@ -116,14 +174,6 @@ glimpse(df1)
 names(df1)
 count(df1, Region)
 
-fstabbr <- function(stname){
-  factor(stname,
-         levels=c("United States",
-                  state.name,
-                  "District of Columbia"),
-         labels=c("US", state.abb, "DC"))
-}
-
 df2 <- df1 |> 
   select(year=Date, stname=Region, everything()) |> 
   mutate(year=as.integer(year), stabbr=fstabbr(stname)) |> 
@@ -148,44 +198,17 @@ saveRDS(df2, here::here("data", "stlpensions_frb.rds"))
 
 ```
 
-
 ```{r}
 #| label: frb-states-show
-#| eval: true
-#| include: true
+#| eval: false
+#| include: false
 #| echo: false
 #| df-print: paged
 
 stpen <- readRDS(here::here("data", "stlpensions_frb.rds"))
 count(stpen, vname, description)
 
-stpen |> 
-  filter(year==max(year), vname=="frpct", stabbr != "DC") |> 
-  select(stname, vname, year, value) |> 
-  arrange(desc(value))
-
-stpen |> 
-  filter(year %in% c(2010, 2020), vname=="frpct", stabbr != "DC") |> 
-  select(stname, year, vname, value) |> 
-  arrange(year) |> 
-  pivot_wider(names_from = year) |> 
-  mutate(change=`2020` - `2010`) |> 
-  arrange(desc(`2020`))
-
-tab <- stpen |> 
-  filter(year %in% c(2010, 2020), vname=="pctgdp", stabbr != "DC") |> 
-  select(stname, year, vname, value) |> 
-  arrange(year) |> 
-  mutate(value=-value) |> 
-  pivot_wider(names_from = year) |> 
-  mutate(change=`2020` - `2010`) |> 
-  arrange(desc(`2020`))
-
-rmarkdown::paged_table(tab)
-
 ```
-
-
 
 ## State and local retirement funds, from BEA
 
@@ -193,93 +216,30 @@ BEA API key: 21F782AD-56A6-439D-B3D5-9A592F020E26
 
 https://apps.bea.gov/itable/?ReqID=70&step=1#eyJhcHBpZCI6NzAsInN0ZXBzIjpbMSwyNCwyOSwyNSwzMSwyNl0sImRhdGEiOltbIlRhYmxlSWQiLCI4MyJdLFsiQ2xhc3NpZmljYXRpb24iLCJOb24tSW5kdXN0cnkiXSxbIk1ham9yX0FyZWEiLCIwIl0sWyJTdGF0ZSIsWyIwIl1dXX0=
 
-Regional data
-GDP and personal income
-SAINC70 Transactions of state and local government defined benefit pension plans
+Regional data GDP and personal income SAINC70 Transactions of state and local government defined benefit pension plans
 
-See this:
-https://jwrchoi.com/post/how-to-use-bureau-of-economic-analysis-bea-api-in-r/
+See this: https://jwrchoi.com/post/how-to-use-bureau-of-economic-analysis-bea-api-in-r/
 
 ```{r}
-#| label: bea-play
+#| label: bea-data
 #| eval: false
 #| include: false
 #| echo: false
 
-library(bea.R)
-beakey <- "21F782AD-56A6-439D-B3D5-9A592F020E26"
+nipaparms <- beaParams(beakey, "NIPA")
+tablecode <- beaParamVals(beaKey = beakey, setName="NIPA", paramName="TableID")$ParamValue
 
-beaSearch('personal consumption', beakey)
-
+rparms <- beaParams(beakey, "Regional")
 linecode <- beaParamVals(beaKey = beakey, "Regional", "LineCode")$ParamValue |> 
   as_tibble() |> 
   lcnames()
-# tmp <- beaParamVals(beaKey = beakey, "Regional", "LineCode")
-tmp <- linecode |> 
-  filter(str_detect(desc, "SAINC70"))
 
-beaSpecs10 <- list(
-  "UserID" = beakey, # Set up API key
-  "Method" = "GetData", # Method
-  "datasetname" = "Regional", # Specify dataset
-  "TableName" = "CAEMP25N", # Specify table within the dataset
-  "LineCode" = 10, # Specify the line code
-  "GeoFips" = "COUNTY", # Specify the geographical level
-  "Year" = 2018 # Specify the year
-)
-
-bea10 <- beaGet(beaSpecs10, asWide = FALSE)
-bea10 <- bea10 |> as_tibble()
-
-specs <- list(
-  UserID = beakey,
-  Method = "GetData",
-  datasetname = "Regional",
-  TableName = "CAEMP25N",
-  LineCode = 10,
-  GeoFips = "COUNTY", # geographic level
-  Year = 2020
-)
-
-df <- beaGet(specs, asWide = FALSE) |> as_tibble()
-glimpse(df)
-
-df2 <- df |> 
-  lcnames() |> 
-  rename(year=timeperiod, clunit=cl_unit, mult=unit_mult, value=datavalue, note=noteref)
-glimpse(df2)
+tmp <- beaParamVals(beaKey = beakey, "Regional", "LineCode")
 
 
-userSpecList <- list('UserID' = 'yourAPIKey' ,
-								'Method' = 'GetData',
-								'datasetname' = 'NIPA',
-								'Frequency' = 'A',
-								'TableID' = '68',
-								'Year' = 'X')	
-specs <- list(
-  UserID = beakey,
-  Method = "GetData",
-  datasetname = "Regional",
-  TableName = "SAINC70",
-  #LineCode = 10,
-  GeoFips = "STATE", # geographic level
-  Year = 'X'
-)
-
-djb <- beaGet(specs, asTable = TRUE)
-
-userSpecList <- list('UserID' = 'yourAPIKey' ,
-								'Method' = 'GetData',
-								'datasetname' = 'NIPA',
-								'Frequency' = 'A',
-								'TableID' = '68',
-								'Year' = 'X')	
-BDT <- beaGet(userSpecList, asTable = TRUE)
-
-
-rparms <- beaParams(beakey, 'Regional')
-pencodes <- linecode |> 
-  filter(str_detect(desc, "SAINC70")) |> 
+## SAGDP1 State annual gross domestic product (GDP) summary ----
+gdpcodes <- linecode |> 
+  filter(str_detect(desc, "SAGDP1]")) |> 
   distinct() |> 
   mutate(key=as.integer(key)) |> 
   arrange(key)
@@ -288,19 +248,134 @@ specs <- list(
   UserID = beakey,
   Method = "GetData",
   datasetname = "Regional",
-  TableName = "SAINC70",
-  LineCode = 10,
+  TableName = "SAGDP1",
+  LineCode = "3", # nominal state gdp
   GeoFips = "STATE", # geographic level
-  Year = 'ALL'
-)
+  Year = 'ALL')
 
-djb <- beaGet(specs, asWide = FALSE)
-count(djb, GeoFips, GeoName)
-djb2 <- djb |> 
+df <- beaGet(specs, asWide = FALSE)
+
+sgdp <- df |>
   lcnames() |> 
-  rename(year=timeperiod, clunit=cl_unit, mult=unit_mult, value=datavalue) |> 
-  mutate(year=as.integer(year))
-skim(djb2)
+  rename(year=timeperiod, clunit=cl_unit, mult=unit_mult, gdp=datavalue) |> 
+  mutate(stabbr=fstabbr(geoname),
+         year=as.integer(year)) |> 
+  select(stabbr, geofips, geoname, year, gdp) |> 
+  arrange(geofips, year) |> 
+  as_tibble()
+saveRDS(sgdp, here::here("data", "sgdp.rds"))
+
+## Table 7.24. Transactions of State and Local Government Defined Benefit Pension Plans ----
+# https://apps.bea.gov/iTable/?reqid=19&step=2&isuri=1&categories=survey#eyJhcHBpZCI6MTksInN0ZXBzIjpbMSwyLDNdLCJkYXRhIjpbWyJjYXRlZ29yaWVzIiwiU3VydmV5Il0sWyJOSVBBX1RhYmxlX0xpc3QiLCIzOTUiXV19
+
+nipaparms
+
+glimpse(tablecode)
+
+tablecode |> 
+  filter(str_detect(Description, "7.24")) # T72400
+
+specs <- list(
+  UserID = beakey,
+  Method = "GetData",
+  datasetname = "NIPA",
+  TableName = "T72400",
+  Frequency = "A",
+  Year = "ALL")
+
+df <- beaGet(specs, asWide = FALSE)
+glimpse(df)
+count(df, TimePeriod) |> ht() # 1929-2021
+count(df, METRIC_NAME) # Current Dollars
+count(df, CL_UNIT)# Level 
+count(df, UNIT_MULT) # 6  (i.e., millions)
+count(df, NoteRef) # notes 1-5, don't think we need this
+
+count(df |> filter(NoteRef=="T72400,T72400.1"), LineDescription) # Less: Pension service charges, Output
+count(df |> filter(NoteRef=="T72400,T72400.2"), LineDescription) # Household pension contribution supplements
+count(df |> filter(NoteRef=="T72400,T72400.3"), LineDescription) # Imputed interest on plans' claims on employers
+count(df |> filter(NoteRef=="T72400,T72400.4"), LineDescription) # Net change in benefit entitlements
+count(df |> filter(NoteRef=="T72400,T72400.5"), LineDescription) # Equals: Change in benefit entitlements...,
+# Equals: Change in personal wealth
+
+df2 <- df |> 
+  select(series=SeriesCode,
+         line=LineNumber,
+         desc=LineDescription,
+         year=TimePeriod,
+         value=DataValue) |> 
+  mutate(line=as.integer(line),
+         year=as.integer(year)) |> 
+  as_tibble()
+glimpse(df2)
+skim(df2)
+
+saveRDS(df2, here::here("data", "tab7.24.rds"))
+
+## Table 1.1.5. Gross Domestic Product ----
+
+nipaparms
+
+glimpse(tablecode)
+
+tablecode |> 
+  filter(str_detect(Description, "1.1.5")) # T10105
+
+specs <- list(
+  UserID = beakey,
+  Method = "GetData",
+  datasetname = "NIPA",
+  TableName = "T10105",
+  Frequency = "A",
+  Year = "ALL")
+
+df <- beaGet(specs, asWide = FALSE)
+glimpse(df)
+count(df, TimePeriod) |> ht() # 1929-2021
+count(df, METRIC_NAME) # Current Dollars
+count(df, CL_UNIT)# Level 
+count(df, UNIT_MULT) # 6  (i.e., millions)
+count(df, NoteRef) # T10105
+
+df2 <- df |> 
+  select(series=SeriesCode,
+         line=LineNumber,
+         desc=LineDescription,
+         year=TimePeriod,
+         value=DataValue) |> 
+  mutate(line=as.integer(line),
+         year=as.integer(year)) |> 
+  as_tibble()
+glimpse(df2)
+skim(df2)
+
+saveRDS(df2, here::here("data", "tab1.1.5gdp.rds"))
+
+
+```
+
+
+```{r}
+#| label: bea-stlpensions
+#| eval: false
+#| include: false
+#| echo: false
+
+rparms <- beaParams(beakey, "Regional")
+
+linecode <- beaParamVals(beaKey = beakey, "Regional", "LineCode")$ParamValue |> 
+  as_tibble() |> 
+  lcnames()
+
+tmp <- beaParamVals(beaKey = beakey, "Regional", "LineCode")
+
+## SAINC70 Transactions of state and local government defined benefit pension plans ----
+
+pencodes <- linecode |> 
+  filter(str_detect(desc, "SAINC70")) |> 
+  distinct() |> 
+  mutate(key=as.integer(key)) |> 
+  arrange(key)
 
 pencodes$key
 
@@ -325,23 +400,117 @@ df2 <- df |>
   rename(year=timeperiod, clunit=cl_unit, mult=unit_mult, value=datavalue) |>
   left_join(pencodes |> rename(line=key),
             by = join_by(line)) |> 
-  mutate(year=as.integer(year),
+  mutate(stabbr=fstabbr(geoname),
+         year=as.integer(year),
          table="SAINC70",
          desc=str_remove(desc, coll("[SAINC70] "))) |> 
-  select(geofips, geoname, table, line, desc, clunit, year, value) |> 
-  arrange(geofips, table, line, year)
+  select(stabbr, geofips, geoname, table, line, desc, clunit, year, value) |> 
+  arrange(geofips, table, line, year) |>
+  as_tibble()
 glimpse(df2)
 skim(df2)
 count(df2, line, desc)
+count(df2, stabbr, geofips, geoname)
 
-df2 |> 
-  filter(geoname=="New York", line==5)
-df2 |> 
-  filter(geoname=="United States", line==5)
+## create mapping of variable names to line numbers ----
+vmap <- read_csv("
+vname, line, desc
+crab,  1, Current receipts accrual basis
+crabo, 2, Current receipts accrual basis: Output
+crabc, 3, Current receipts accrual basis: Contributions
+contrib, 4, Contributions: Claims to benefits accrued through service to employers
+aec, 5, Claims to benefits accrued through service to employers: Actual employer contributions
+iec, 6, Claims to benefits accrued through service to employers: Imputed employer contributions
+ahc, 7, Claims to benefits accrued through service to employers: Actual household contributions
+psc, 8, Claims to benefits accrued through service to employers: Less: Pension service charges
+hpcsupp, 9, Contributions: Household pension contribution supplements
+crabira, 10, Current receipts accrual basis: Income receipts on assets (including plans' claims on employers)
+irai, 11, Income receipts on assets (including plans' claims on employers): Interest
+mi, 12, Monetary interest
+iipce, 13, Imputed interest on plans' claims on employers
+div, 14, Income receipts on assets (including plans' claims on employers): Dividends
+cxab, 15, Current expenditures accrual basis
+cxabadmin, 16, Current expenditures accrual basis: Administrative expenses
+cxabiipay, 17, Current expenditures accrual basis: Imputed income payments on assets to persons
+iipaint, 18, Imputed income payments on assets to persons: Interest
+iipadiv, 19, Imputed income payments on assets to persons: Dividends
+cxabben, 20, Current expenditures accrual basis: Benefit payments and withdrawals
+cxabbenchg, 21, Current expenditures accrual basis: Net change in benefit entitlements
+cashflow, 22, Cash flow
+cashflowaehc, 23, Cash flow: Actual employer and household contributions
+cashflowmi, 24, Cash flow: Monetary income receipts on assets
+ben, 25, Cash flow: Less: Benefit payments and withdrawals
+cashflowadmin, 26, Cash flow: Less: Administrative expenses
+enc, 27, Employers' normal cost
+iabe, 28, Interest accrued on benefit entitlements
+liabeoy, 29, Benefit entitlements
+ass, 30, Pension plan assets
+claims, 31, Plans' claims on employers
+fr, 32, Funded ratio
+")
+# problems(vmap)
+vmap
 
 
+
+df3 <- df2 |> 
+  # filter(!is.na(stabbr)) |> 
+  select(table, stabbr, line, desc, year, value) |> 
+  left_join(vmap |> select(line, vname, descv=desc),
+            by = join_by(line))
+count(df3, desc, descv)
+
+df4 <- df3 |> 
+  select(-descv)
+
+
+saveRDS(df4, here::here("data", "stlpensions_bea.rds"))
 
 ```
 
 
+```{r}
+#| label: bea-show
+#| eval: false
+#| include: false
+#| echo: false
+
+pen <- readRDS(here::here("data", "stlpensions_bea.rds"))
+sgdp <- readRDS(here::here("data", "sgdp.rds"))
+
+sts <- c("NY", "US", "CA", "IL", "CT")
+year1 <- 2007
+pen |> 
+  filter(stabbr %in% sts, line==5, year %in% year1:max(year)) |> 
+  mutate(ierc=value / value[year==year1], .by=stabbr) |>
+  ggplot(aes(year, ierc, colour=stabbr)) +
+  geom_line() +
+  geom_point()
+count(pen, line, desc)
+
+glimpse(pen)
+glimpse(sgdp)
+
+df <- pen |> 
+  filter(stabbr %in% c(state.abb, "US"), line==5) |> 
+  select(stabbr, year, erc=value) |> 
+  left_join(sgdp |> select(stabbr, year, gdp),
+            by = join_by(stabbr, year)) |> 
+  mutate(erc=erc / 1000) # $ millions
+         
+
+df |> 
+  mutate(ercpct=erc / gdp) |> 
+  filter(year==2021) |> 
+  arrange(desc(ercpct))
+
+df |> 
+  mutate(ercpct=erc / gdp) |>
+  filter(stabbr %in% c("IL", "CT", "CA", "OR", "RI", "NJ", "US")) |> 
+  ggplot(aes(year, ercpct, colour=stabbr)) +
+  geom_line() +
+  geom_point() +
+  scale_y_continuous(limits=c(0, .017))
+
+```
 

@@ -1,0 +1,161 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Unfunded liabilities as percentage of GDP vs. funded ratio
+
+```{r}
+#| label: setup
+#| eval: true
+#| include: false
+#| echo: false
+
+source(here::here("r", "libraries.r"))
+
+library(ggalt)
+library(ggforce)
+
+
+```
+
+Source: FRB state-level data
+
+
+```{r}
+#| label: plot-data
+#| eval: true
+#| include: false
+#| echo: false
+#| df-print: paged
+
+stpen <- readRDS(here::here("data", "stlpensions_frb.rds"))
+count(stpen, vname, description)
+
+pdata <- stpen |> 
+  filter(year==2020, vname %in% c("pctgdp", "frpct"), !stabbr %in% c("DC", "US")) |> 
+  select(stabbr, year, vname, value) |> 
+  pivot_wider(names_from = vname) |> 
+  mutate(pctgdp=-pctgdp)
+
+```
+
+```{r}
+#| label: plot-show
+#| eval: true
+#| include: true
+#| echo: false
+#| df-print: paged
+
+# https://luisdva.github.io/rstats/Grouping-points/
+
+note <- "Note: Crosslines mark 50-state medians"
+src <- "Source: State and Local Government Defined Benefit Pension Plans: State-level Detail, Federal Reserve Board, https://www.federalreserve.gov/releases/z1/dataviz/pension/"
+capt <- paste0(note, "\n", src)
+
+txtsize <- 3
+
+p <- pdata |> 
+  mutate(grp=case_when(stabbr %in% "IL" ~ "badall",
+                       stabbr %in% c("HI", "MS", "NM") ~ "badgdp",
+                       stabbr %in% c("CT", "KY", "NJ") ~ "badfr",
+                       stabbr %in% c("CA", "AK") ~ "badgdpokfr",
+                       TRUE ~ "notsobad"),
+         grp=factor(grp)) |> 
+  ggplot(aes(pctgdp, frpct, colour=grp)) +
+  geom_point(size=0.7) +
+  geom_text_repel(aes(label=stabbr), size=3, fontface = "bold", point.padding = 0.005) +
+  geom_mark_ellipse(aes(colour=grp),
+                    expand = unit(7, "mm"),
+                    data=function(df) df |> filter(!grp %in% c("notsobad"))) + # c("badgdpokfr", "notsobad")
+  geom_hline(aes(yintercept = median(frpct))) +
+  geom_vline(aes(xintercept = median(pctgdp))) +
+  scale_y_continuous(name="Funded ratio (market assets as % of liability)", 
+                     breaks=seq(0, 1, .05),
+                     labels = label_percent(accuracy=1)) +
+  scale_x_continuous(name="Unfunded liability % of GDP",
+                     breaks=seq(0, 1, .05),
+                     labels = label_percent(accuracy=1)) +
+  scale_color_manual(values=c("darkred", "#f03b20", "#f03b20", "#f03b20", "black")) +
+  ggtitle("Funded ratio vs. Unfunded liabilities as % of GDP, 2020") +
+  annotate("text", 
+           label="Better funded ratio,\nWorse relative to economy", 
+           size=txtsize,
+           colour="#d95f0e",
+           fontface = "bold",
+           hjust=0,
+           x=.22, y=.82) +
+    annotate("text", 
+           label="Better funded ratio,\nBetter relative to economy", 
+           size=txtsize,
+           colour="darkgreen",
+           fontface = "bold",
+           hjust=0,
+           x=.07, y=.82) +
+    annotate("text", 
+           label="Worse funded ratio,\nBetter relative to economy", 
+           size=txtsize,
+           colour="#d95f0e",
+           fontface = "bold",
+           hjust=0,
+           x=.07, y=.35) +  
+    annotate("text", 
+           label="Worse funded ratio,\nWorse relative to economy", 
+           size=txtsize,
+           colour="#f03b20",
+           fontface = "bold",
+           hjust=0,
+           x=.22, y=.35) +    
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(caption=capt) +
+  theme(plot.caption = element_text(hjust=0, size=rel(.8)))+
+  legend_none
+p
+ggsave(here::here("results", "scatter.png"), p, width=11, height=6, scale=1, units="in")
+
+
+# p <- pdata |> 
+#   # filter(stabbr!="US", claims >= uflmdn | fr < frmdn) %>%
+#   mutate(grp=case_when(stabbr %in% "IL" ~ "badall",
+#                        stabbr %in% c("HI", "MS", "NM") ~ "badgdp", # "AK", 
+#                        stabbr %in% c("CT", "KY", "NJ") ~ "badfr",
+#                        TRUE ~ "notsobad"),
+#          grp=factor(grp)) |> 
+#   ggplot(aes(pctgdp, frpct, colour=grp, label=stabbr)) +
+#   geom_point(size=0.7) +
+#   geom_text_repel(size=3, fontface = "bold", point.padding = 0.005) +
+#   # geom_encircle(s_shape=0.4, expand=0.16, data=function(df) subset(df, grp %in% c("badgdp"))) +
+#   # groups: 1 AK MS NM badgdp, 2: IL badall
+#   # settings for other groups affect an unchanged group!
+#   # s_shape 0=circle-like, 1= straight lines default 0.5
+#   # expand: how far to move the lines from the points default 0.05. CANNOT BE ZERO
+#   # spread: default 0.1
+#   # geom_encircle(s_shape=0,  # c(0.4, .4, 0, 0), .5
+#   #               expand=.1,  # .05
+#   #               spread=.1, # 0.1  # # size=c(0.1, 0.1, 0.1, 0.1) 1??
+#   #               data=function(df) df |> filter(grp %in% c("badfr"))) +    
+#   geom_mark_ellipse(aes(filter = grp=="badfr", label="low funded\nratio"), con.type = "none",
+#                     label.buffer = unit(1, "mm")) +
+#   geom_mark_ellipse(aes(filter = grp=="badgdp", label="high unfunded\nvs. economy"), con.type = "none",
+#                     label.buffer = unit(1, "mm")) +
+#   geom_mark_ellipse(aes(filter = grp=="badall", label="bad all\naround"), con.type = "none",
+#                     label.buffer = unit(1, "mm")) +
+#   geom_hline(yintercept = frmdn) +
+#   geom_vline(xintercept = uflmdn) +
+#   scale_y_continuous(name="Funded ratio (market assets as % of liability)", breaks=seq(0, 80, 5)) +
+#   scale_x_continuous(name="Unfunded liability % of GDP", breaks=seq(0, 80, 5)) +
+#   scale_color_manual(values=c("darkred", "#fd8d3c", "#f03b20", "black")) +
+#   ggtitle("Funded ratio vs. Unfunded liabilities as % of GDP, 2018",
+#           subtitle="States with funded ratio, or unfunded liability as % of GDP, that is worse than median") +
+#   theme_bw() +
+#   theme(legend.position = "none") +
+#   labs(caption="Note: Crosslines mark 50-state medians") +
+#   theme(plot.caption = element_text(hjust=0, size=rel(.8)))
+# p
+
+
+
+```
+
